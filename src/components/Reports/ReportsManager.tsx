@@ -1,16 +1,21 @@
 import React, { useState } from 'react';
-import { BarChart3, FileText, Download, Calendar, DollarSign, TrendingUp, PieChart, FileSpreadsheet, Award } from 'lucide-react';
+import { BarChart3, FileText, Download, Calendar, DollarSign, TrendingUp, PieChart, FileSpreadsheet, Award, FileEdit } from 'lucide-react';
 import { Operation, Client } from '../../types';
 import { formatCurrency, formatDate } from '../../utils/calculations';
 import { 
   exportOperationsToPDF, 
-  exportOperationsToExcel, 
+  exportOperationsToExcel,
+  exportOperationsToWord,
   exportClientsToPDF, 
   exportClientsToExcel,
+  exportClientsToWord,
   exportFinancialReportToPDF,
   exportFinancialReportToExcel,
+  exportFinancialReportToWord,
   exportDetailedGuaranteesReportToPDF,
-  exportWarrantyCertificatesReportToPDF
+  exportDetailedGuaranteesReportToWord,
+  exportWarrantyCertificatesReportToPDF,
+  exportWarrantyCertificatesReportToWord
 } from '../../utils/exportUtils';
 
 interface ReportsManagerProps {
@@ -146,6 +151,36 @@ const ReportsManager: React.FC<ReportsManagerProps> = ({ operations, clients }) 
     }
   };
 
+  const handleExportWord = () => {
+    try {
+      switch (activeReport) {
+        case 'summary':
+          exportOperationsToWord(filteredOperations, clients, 'تقرير العمليات الإجمالي');
+          break;
+        case 'client':
+          exportClientsToWord(clients, 'تقرير العملاء');
+          break;
+        case 'financial':
+          exportFinancialReportToWord(filteredOperations, clients);
+          break;
+        case 'guarantees':
+          exportOperationsToWord(filteredOperations, clients, 'تقرير الضمانات');
+          break;
+        case 'detailed-guarantees':
+          exportDetailedGuaranteesReportToWord(filteredOperations, clients);
+          break;
+        case 'warranties':
+          exportWarrantyCertificatesReportToWord(filteredOperations, clients);
+          break;
+        default:
+          exportOperationsToWord(filteredOperations, clients);
+      }
+    } catch (error) {
+      console.error('خطأ في تصدير Word:', error);
+      alert('حدث خطأ أثناء تصدير ملف Word');
+    }
+  };
+
   const exportReport = () => {
     const reportData = {
       reportType: activeReport,
@@ -221,7 +256,7 @@ const ReportsManager: React.FC<ReportsManagerProps> = ({ operations, clients }) 
 
       {/* Filters and Export */}
       <div className="mb-6 bg-white p-4 rounded-lg border border-gray-200">
-        <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-7 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">العميل</label>
             <select
@@ -280,8 +315,18 @@ const ReportsManager: React.FC<ReportsManagerProps> = ({ operations, clients }) 
 
           <div className="flex items-end">
             <button
-              onClick={exportReport}
+              onClick={handleExportWord}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors w-full justify-center"
+            >
+              <FileEdit className="w-4 h-4" />
+              Word
+            </button>
+          </div>
+
+          <div className="flex items-end">
+            <button
+              onClick={exportReport}
+              className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors w-full justify-center"
             >
               <Download className="w-4 h-4" />
               JSON
@@ -658,7 +703,7 @@ const ReportsManager: React.FC<ReportsManagerProps> = ({ operations, clients }) 
                   <p className="text-sm font-medium text-blue-600">الشهادات النشطة</p>
                   <p className="text-2xl font-bold text-blue-900">{activeWarranties}</p>
                 </div>
-                <CheckCircle className="w-8 h-8 text-blue-600" />
+                <TrendingUp className="w-8 h-8 text-blue-600" />
               </div>
             </div>
 
@@ -668,7 +713,7 @@ const ReportsManager: React.FC<ReportsManagerProps> = ({ operations, clients }) 
                   <p className="text-sm font-medium text-red-600">الشهادات المنتهية</p>
                   <p className="text-2xl font-bold text-red-900">{totalWarranties - activeWarranties}</p>
                 </div>
-                <AlertTriangle className="w-8 h-8 text-red-600" />
+                <Calendar className="w-8 h-8 text-red-600" />
               </div>
             </div>
           </div>

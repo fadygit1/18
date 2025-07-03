@@ -1,8 +1,8 @@
 import React from 'react';
-import { X, Calendar, DollarSign, User, FileText, CreditCard, CheckCircle, AlertTriangle, Download, Minus } from 'lucide-react';
+import { X, Calendar, DollarSign, User, FileText, CreditCard, CheckCircle, AlertTriangle, Download, Minus, FileEdit } from 'lucide-react';
 import { Operation, Client } from '../../types';
 import { formatCurrency, formatDate, calculateNetAmount, calculateTotalDeductions, calculateExecutedTotal } from '../../utils/calculations';
-import { exportOperationDetailsToPDF } from '../../utils/exportUtils';
+import { exportOperationDetailsToPDF, exportOperationDetailsToWord } from '../../utils/exportUtils';
 
 interface OperationDetailsProps {
   operation: Operation;
@@ -25,6 +25,15 @@ const OperationDetails: React.FC<OperationDetailsProps> = ({ operation, client, 
     }
   };
 
+  const handleExportWord = () => {
+    try {
+      exportOperationDetailsToWord(operation, client);
+    } catch (error) {
+      console.error('خطأ في تصدير Word:', error);
+      alert('حدث خطأ أثناء تصدير ملف Word');
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
@@ -40,6 +49,13 @@ const OperationDetails: React.FC<OperationDetailsProps> = ({ operation, client, 
             >
               <Download className="w-4 h-4" />
               تصدير PDF
+            </button>
+            <button
+              onClick={handleExportWord}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <FileEdit className="w-4 h-4" />
+              تصدير Word
             </button>
             <button
               onClick={onClose}

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { CheckSquare, Search, Filter, Calendar, DollarSign, AlertTriangle, CheckCircle, Download, FileSpreadsheet } from 'lucide-react';
+import { CheckSquare, Search, Filter, Calendar, DollarSign, AlertTriangle, CheckCircle, Download, FileSpreadsheet, FileEdit } from 'lucide-react';
 import { Operation, Client, ReceivedPayment } from '../../types';
 import { formatCurrency, formatDate } from '../../utils/calculations';
-import { exportChecksAndPaymentsToPDF, exportChecksAndPaymentsToExcel } from '../../utils/exportUtils';
+import { exportChecksAndPaymentsToPDF, exportChecksAndPaymentsToExcel, exportChecksAndPaymentsToWord } from '../../utils/exportUtils';
 
 interface ChecksManagerProps {
   operations: Operation[];
@@ -67,6 +67,15 @@ const ChecksManager: React.FC<ChecksManagerProps> = ({ operations, clients }) =>
     } catch (error) {
       console.error('خطأ في تصدير Excel:', error);
       alert('حدث خطأ أثناء تصدير ملف Excel');
+    }
+  };
+
+  const handleExportWord = () => {
+    try {
+      exportChecksAndPaymentsToWord(operations, clients);
+    } catch (error) {
+      console.error('خطأ في تصدير Word:', error);
+      alert('حدث خطأ أثناء تصدير ملف Word');
     }
   };
 
@@ -135,6 +144,13 @@ const ChecksManager: React.FC<ChecksManagerProps> = ({ operations, clients }) =>
         >
           <FileSpreadsheet className="w-4 h-4" />
           تصدير Excel
+        </button>
+        <button
+          onClick={handleExportWord}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+        >
+          <FileEdit className="w-4 h-4" />
+          تصدير Word
         </button>
       </div>
 

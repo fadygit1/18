@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { CreditCard, FileText, Search, Filter, Calendar, AlertTriangle, CheckCircle, X, Download, FileSpreadsheet } from 'lucide-react';
+import { CreditCard, FileText, Search, Filter, Calendar, AlertTriangle, CheckCircle, X, Download, FileSpreadsheet, FileEdit } from 'lucide-react';
 import { Operation, Client, GuaranteeCheck, GuaranteeLetter } from '../../types';
 import { formatCurrency, formatDate } from '../../utils/calculations';
-import { exportDetailedGuaranteesReportToPDF, exportGuaranteesToExcel } from '../../utils/exportUtils';
+import { exportDetailedGuaranteesReportToPDF, exportGuaranteesToExcel, exportDetailedGuaranteesReportToWord } from '../../utils/exportUtils';
 
 interface GuaranteesManagerProps {
   operations: Operation[];
@@ -204,6 +204,15 @@ const GuaranteesManager: React.FC<GuaranteesManagerProps> = ({ operations, clien
     }
   };
 
+  const handleExportWord = () => {
+    try {
+      exportDetailedGuaranteesReportToWord(operations, clients);
+    } catch (error) {
+      console.error('خطأ في تصدير Word:', error);
+      alert('حدث خطأ أثناء تصدير ملف Word');
+    }
+  };
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -254,6 +263,13 @@ const GuaranteesManager: React.FC<GuaranteesManagerProps> = ({ operations, clien
         >
           <FileSpreadsheet className="w-4 h-4" />
           تصدير Excel
+        </button>
+        <button
+          onClick={handleExportWord}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+        >
+          <FileEdit className="w-4 h-4" />
+          تصدير Word
         </button>
       </div>
 
