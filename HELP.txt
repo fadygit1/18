@@ -1,0 +1,85 @@
+CONSTRUCTION MANAGEMENT SYSTEM - DETAILED HELP
+===============================================
+
+STEP BY STEP GUIDE:
+
+1. FIRST TIME SETUP:
+   a) Install Node.js from https://nodejs.org (choose LTS version)
+   b) Restart computer after Node.js installation
+   c) Double-click run.bat
+   d) Wait for automatic installation (2-5 minutes)
+   e) Browser opens automatically at http://localhost:5173
+
+2. DAILY USE:
+   a) Double-click run.bat
+   b) Wait for browser to open
+   c) Don't close the black command window
+   d) Use the system normally
+
+3. TROUBLESHOOTING:
+
+   Problem: "Cannot find project files"
+   Solution: Make sure you have either:
+   - src/main.tsx in same folder as run.bat
+   - project/src/main.tsx structure
+
+   Problem: "Node.js not installed"
+   Solution: Download from https://nodejs.org
+   - Choose LTS (Long Term Support) version
+   - Install with default settings
+   - Restart computer
+
+   Problem: "Installation failed"
+   Solutions:
+   1. Check internet connection
+   2. Right-click run.bat → "Run as administrator"
+   3. Temporarily disable antivirus
+   4. Try different network/WiFi
+
+   Problem: Browser doesn't open automatically
+   Solution: Open browser manually and go to:
+   http://localhost:5173
+
+   Problem: run.bat opens and closes immediately
+   Solution: 
+   1. Run check.bat to see what's wrong
+   2. Run install.bat to fix dependencies
+   3. Make sure all files are in correct location
+
+4. SYSTEM REQUIREMENTS:
+   - Windows 7 or newer
+   - Node.js 16 or newer
+   - 2GB RAM minimum
+   - 500MB free disk space
+   - Internet connection (first time only)
+
+5. FILE STRUCTURE:
+   The system works with either structure:
+   
+   Structure A (files in same folder):
+   your-folder/
+   ├── run.bat
+   ├── src/
+   ├── package.json
+   └── other files...
+   
+   Structure B (files in project subfolder):
+   your-folder/
+   ├── run.bat
+   └── project/
+       ├── src/
+       ├── package.json
+       └── other files...
+
+6. ADVANCED TROUBLESHOOTING:
+   - Use check.bat to diagnose all issues
+   - Use install.bat to reinstall dependencies
+   - All files are now in English to avoid encoding issues
+   - System auto-detects project location
+
+All batch files are now completely in English to prevent
+any character encoding issues with Arabic text!
+
+SUPPORT:
+Email: support@construction-system.com
+Website: www.construction-system.com
