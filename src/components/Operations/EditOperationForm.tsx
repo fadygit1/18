@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Save, X, Calendar, CreditCard, FileText } from 'lucide-react';
 import { Client, Operation, OperationItem, Deduction, GuaranteeCheck, GuaranteeLetter, ReceivedPayment } from '../../types';
-import { generateItemCode, calculateOperationTotal, calculateOverallExecutionPercentage, formatCurrency } from '../../utils/calculations';
+import { generateItemCode, calculateOperationTotal, calculateOverallExecutionPercentage, calculateOperationStatus, formatCurrency } from '../../utils/calculations';
 
 interface EditOperationFormProps {
   operation: Operation;
@@ -88,6 +88,7 @@ const EditOperationForm: React.FC<EditOperationFormProps> = ({ operation, client
       expiryDate: expiryDate,
       bank: '',
       isReturned: false,
+      relatedTo: 'operation'
     };
     setGuaranteeChecks([...guaranteeChecks, newCheck]);
   };
@@ -168,10 +169,14 @@ const EditOperationForm: React.FC<EditOperationFormProps> = ({ operation, client
     const overallExecutionPercentage = calculateOverallExecutionPercentage(items);
     const totalReceived = receivedPayments.reduce((sum, payment) => sum + payment.amount, 0);
     
-    let status: Operation['status'] = 'in_progress';
-    if (overallExecutionPercentage >= 100) {
-      status = totalReceived >= totalAmount ? 'completed' : 'completed_partial_payment';
-    }
+    // حساب الحالة الجديدة باستخدام الدالة المحسنة
+    const status = calculateOperationStatus({
+      ...operation,
+      items,
+      deductions,
+      overallExecutionPercentage,
+      totalReceived
+    });
 
     const updatedOperation: Operation = {
       ...operation,
@@ -206,6 +211,9 @@ const EditOperationForm: React.FC<EditOperationFormProps> = ({ operation, client
       <div className="mb-6">
         <h2 className="text-3xl font-bold text-gray-900 mb-2">تعديل العملية</h2>
         <p className="text-gray-600">تعديل بيانات العملية: {operation.name}</p>
+        <div className="mt-2 text-sm text-blue-600">
+          ملاحظة: يمكن تعديل العملية في أي وقت حتى بعد اكتمالها لإضافة شهادات ضمان أو ملاحق جديدة
+        </div>
       </div>
 
       {/* Section Navigation */}

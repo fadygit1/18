@@ -51,6 +51,36 @@ export const calculateOverallExecutionPercentage = (items: OperationItem[]): num
   return totalAmount > 0 ? (executedAmount / totalAmount) * 100 : 0;
 };
 
+// دالة محسنة لحساب حالة العملية
+export const calculateOperationStatus = (operation: Operation): Operation['status'] => {
+  const executionPercentage = operation.overallExecutionPercentage;
+  const netAmount = calculateNetAmount(operation);
+  const totalReceived = operation.totalReceived;
+  
+  // إذا لم تكتمل العملية بعد
+  if (executionPercentage < 100) {
+    return 'in_progress';
+  }
+  
+  // إذا اكتملت العملية
+  if (executionPercentage >= 100) {
+    // إذا تم تحصيل المبلغ كاملاً (مع هامش خطأ صغير)
+    if (Math.abs(totalReceived - netAmount) <= 0.01) {
+      return 'completed_full_payment';
+    }
+    // إذا تم تحصيل جزء من المبلغ
+    else if (totalReceived > 0) {
+      return 'completed_partial_payment';
+    }
+    // إذا لم يتم تحصيل أي مبلغ
+    else {
+      return 'completed';
+    }
+  }
+  
+  return 'in_progress';
+};
+
 export const generateOperationCode = (clientName: string, operationName: string): string => {
   const clientCode = clientName.split(' ')[0].substring(0, 3).toUpperCase();
   const operationCode = operationName.split(' ')[0].substring(0, 3).toUpperCase();

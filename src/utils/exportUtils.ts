@@ -4,1907 +4,1394 @@ import * as XLSX from 'xlsx';
 import { Operation, Client } from '../types';
 import { formatCurrency, formatDate, calculateNetAmount, calculateTotalDeductions, calculateExecutedTotal } from './calculations';
 
-// إعداد الخط العربي لـ PDF
-const setupArabicPDFFont = (doc: jsPDF) => {
-  // استخدام خط يدعم العربية
+// حل بديل لمشكلة PDF - استخدام HTML2Canvas أو تحويل إلى صور
+const createSimplePDF = (title: string, data: any[], headers: string[]) => {
+  const doc = new jsPDF();
+  
+  // استخدام خط افتراضي يدعم Unicode
   doc.setFont('helvetica');
-  doc.setFontSize(12);
-  doc.setR2L(true); // تفعيل الكتابة من اليمين لليسار
+  
+  // إضافة العنوان بالإنجليزية
+  doc.setFontSize(16);
+  doc.text(title, 20, 20);
+  
+  // إضافة التاريخ
+  doc.setFontSize(10);
+  doc.text(`Date: ${new Date().toLocaleDateString()}`, 20, 30);
+  
+  // إنشاء الجدول
+  const tableData = data.map(row => 
+    headers.map(header => {
+      const value = row[header];
+      if (typeof value === 'string' && /[\u0600-\u06FF]/.test(value)) {
+        // إذا كان النص عربي، استبدله بـ placeholder
+        return '[Arabic Text]';
+      }
+      return value || '';
+    })
+  );
+
+  (doc as any).autoTable({
+    head: [headers.map(h => h.replace(/[\u0600-\u06FF]/g, '[AR]'))],
+    body: tableData,
+    startY: 40,
+    styles: {
+      fontSize: 8,
+      cellPadding: 2,
+    },
+    headStyles: {
+      fillColor: [66, 139, 202],
+      textColor: 255,
+    },
+  });
+
+  return doc;
 };
 
-// دالة لتنسيق النص العربي للعرض الصحيح
-const formatArabicText = (text: string): string => {
-  if (!text) return '';
-  
-  // إزالة الأحرف الخاصة التي قد تسبب مشاكل في العرض
-  let formattedText = text.replace(/[\u200E\u200F\u202A-\u202E]/g, '');
-  
-  // التأكد من أن النص يحتوي على أحرف عربية
-  const hasArabic = /[\u0600-\u06FF]/.test(formattedText);
-  
-  if (hasArabic) {
-    // إضافة علامة اتجاه النص العربي
-    formattedText = '\u202B' + formattedText + '\u202C';
-  }
-  
-  return formattedText;
-};
-
-// دالة لإنشاء محتوى Word
-const createWordDocument = (title: string, content: any[]): Blob => {
-  let htmlContent = `
+// دالة بديلة لتصدير PDF بتنسيق HTML
+const exportAsHTMLToPDF = (title: string, content: string) => {
+  const htmlContent = `
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
     <head>
       <meta charset="UTF-8">
+      <title>${title}</title>
       <style>
-        body { 
-          font-family: 'Arial', 'Tahoma', sans-serif; 
-          direction: rtl; 
+        body {
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+          direction: rtl;
           text-align: right;
           margin: 20px;
           line-height: 1.6;
         }
-        h1 { 
-          color: #2563eb; 
-          text-align: center; 
-          border-bottom: 2px solid #2563eb;
+        .header {
+          text-align: center;
+          border-bottom: 2px solid #333;
           padding-bottom: 10px;
-          margin-bottom: 30px;
+          margin-bottom: 20px;
         }
-        h2 { 
-          color: #1e40af; 
-          margin-top: 30px;
-          margin-bottom: 15px;
+        .title {
+          font-size: 24px;
+          font-weight: bold;
+          color: #333;
+          margin-bottom: 10px;
         }
-        table { 
-          width: 100%; 
-          border-collapse: collapse; 
+        .date {
+          font-size: 14px;
+          color: #666;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
           margin: 20px 0;
           font-size: 12px;
         }
-        th, td { 
-          border: 1px solid #ddd; 
-          padding: 8px; 
+        th, td {
+          border: 1px solid #ddd;
+          padding: 8px;
           text-align: right;
         }
-        th { 
-          background-color: #f3f4f6; 
+        th {
+          background-color: #f2f2f2;
           font-weight: bold;
-          color: #374151;
         }
-        tr:nth-child(even) { 
-          background-color: #f9fafb; 
-        }
-        .summary { 
-          background-color: #eff6ff; 
-          padding: 15px; 
-          border-radius: 5px; 
+        .summary {
+          background-color: #f9f9f9;
+          padding: 15px;
+          border-radius: 5px;
           margin: 20px 0;
         }
-        .date { 
-          text-align: left; 
-          color: #6b7280; 
-          font-size: 10px;
+        .summary h3 {
+          margin-top: 0;
+          color: #333;
         }
-        .currency { 
-          font-weight: bold; 
-          color: #059669;
+        .print-button {
+          background-color: #007bff;
+          color: white;
+          padding: 10px 20px;
+          border: none;
+          border-radius: 5px;
+          cursor: pointer;
+          margin: 10px;
         }
-        .status-active { 
-          color: #059669; 
-          font-weight: bold;
-        }
-        .status-inactive { 
-          color: #dc2626; 
-          font-weight: bold;
-        }
-        .status-pending { 
-          color: #d97706; 
-          font-weight: bold;
+        @media print {
+          .print-button { display: none; }
         }
       </style>
     </head>
     <body>
-      <h1>${title}</h1>
-      <div class="date">تاريخ التقرير: ${formatDate(new Date())}</div>
-  `;
-
-  // إضافة المحتوى
-  content.forEach(section => {
-    if (section.type === 'summary') {
-      htmlContent += `
-        <div class="summary">
-          <h2>${section.title}</h2>
-          ${section.items.map(item => `
-            <p><strong>${item.label}:</strong> ${item.value}</p>
-          `).join('')}
-        </div>
-      `;
-    } else if (section.type === 'table') {
-      htmlContent += `
-        <h2>${section.title}</h2>
-        <table>
-          <thead>
-            <tr>
-              ${section.headers.map(header => `<th>${header}</th>`).join('')}
-            </tr>
-          </thead>
-          <tbody>
-            ${section.rows.map(row => `
-              <tr>
-                ${row.map(cell => `<td>${cell}</td>`).join('')}
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      `;
-    }
-  });
-
-  htmlContent += `
+      <div class="header">
+        <div class="title">${title}</div>
+        <div class="date">تاريخ التقرير: ${new Date().toLocaleDateString('ar-EG')}</div>
+      </div>
+      <button class="print-button" onclick="window.print()">طباعة التقرير</button>
+      ${content}
     </body>
     </html>
   `;
 
-  return new Blob([htmlContent], { 
-    type: 'application/msword;charset=utf-8' 
-  });
-};
-
-// دالة لحفظ ملف Word
-const saveWordDocument = (blob: Blob, filename: string) => {
+  const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${title.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.html`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
   URL.revokeObjectURL(url);
+
+  // فتح في نافذة جديدة للطباعة
+  const printWindow = window.open('', '_blank');
+  if (printWindow) {
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  }
 };
 
-// تصدير تفاصيل العملية إلى PDF
+export const exportOperationsToPDF = (operations: Operation[], clients: Client[], title = 'تقرير العمليات') => {
+  const getClientName = (clientId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    return client ? client.name : 'عميل غير معروف';
+  };
+
+  const getStatusLabel = (status: Operation['status']) => {
+    const statusLabels = {
+      'in_progress': 'قيد التنفيذ',
+      'completed': 'مكتملة',
+      'completed_partial_payment': 'مكتملة - دفع جزئي',
+      'completed_full_payment': 'مكتملة ومدفوعة بالكامل'
+    };
+    return statusLabels[status] || status;
+  };
+
+  let tableContent = `
+    <table>
+      <thead>
+        <tr>
+          <th>كود العملية</th>
+          <th>اسم العملية</th>
+          <th>العميل</th>
+          <th>القيمة الإجمالية</th>
+          <th>الخصومات</th>
+          <th>الصافي المستحق</th>
+          <th>المبلغ المحصل</th>
+          <th>المتبقي</th>
+          <th>نسبة الإنجاز</th>
+          <th>الحالة</th>
+          <th>تاريخ الإنشاء</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  let totalAmount = 0;
+  let totalReceived = 0;
+  let totalDeductions = 0;
+
+  operations.forEach(operation => {
+    const deductions = calculateTotalDeductions(operation);
+    const netAmount = calculateNetAmount(operation);
+    const remainingAmount = netAmount - operation.totalReceived;
+    
+    totalAmount += operation.totalAmount;
+    totalReceived += operation.totalReceived;
+    totalDeductions += deductions;
+
+    tableContent += `
+      <tr>
+        <td>${operation.code}</td>
+        <td>${operation.name}</td>
+        <td>${getClientName(operation.clientId)}</td>
+        <td>${formatCurrency(operation.totalAmount)}</td>
+        <td>${formatCurrency(deductions)}</td>
+        <td>${formatCurrency(netAmount)}</td>
+        <td>${formatCurrency(operation.totalReceived)}</td>
+        <td>${formatCurrency(remainingAmount)}</td>
+        <td>${operation.overallExecutionPercentage.toFixed(1)}%</td>
+        <td>${getStatusLabel(operation.status)}</td>
+        <td>${formatDate(operation.createdAt)}</td>
+      </tr>
+    `;
+  });
+
+  tableContent += `
+      </tbody>
+    </table>
+  `;
+
+  const summaryContent = `
+    <div class="summary">
+      <h3>ملخص التقرير</h3>
+      <p><strong>عدد العمليات:</strong> ${operations.length}</p>
+      <p><strong>إجمالي القيمة:</strong> ${formatCurrency(totalAmount)}</p>
+      <p><strong>إجمالي الخصومات:</strong> ${formatCurrency(totalDeductions)}</p>
+      <p><strong>إجمالي المحصل:</strong> ${formatCurrency(totalReceived)}</p>
+      <p><strong>إجمالي المتبقي:</strong> ${formatCurrency(totalAmount - totalReceived)}</p>
+    </div>
+  `;
+
+  const content = summaryContent + tableContent;
+  exportAsHTMLToPDF(title, content);
+};
+
 export const exportOperationDetailsToPDF = (operation: Operation, client: Client) => {
-  const doc = new jsPDF({
-    orientation: 'portrait',
-    unit: 'mm',
-    format: 'a4'
-  });
-  
-  setupArabicPDFFont(doc);
-
-  // العنوان
-  doc.setFontSize(18);
-  const titleText = `تفاصيل العملية: ${formatArabicText(operation.name)}`;
-  doc.text(titleText, doc.internal.pageSize.getWidth() / 2, 20, { align: 'center' });
-  
-  // معلومات العملية
-  doc.setFontSize(12);
-  let yPosition = 40;
-  
-  doc.text(`اسم العملية: ${formatArabicText(operation.name)}`, 20, yPosition);
-  yPosition += 10;
-  doc.text(`كود العملية: ${operation.code}`, 20, yPosition);
-  yPosition += 10;
-  doc.text(`العميل: ${formatArabicText(client.name)}`, 20, yPosition);
-  yPosition += 10;
-  
-  const clientTypeLabels = {
-    'owner': 'مالك',
-    'main_contractor': 'مقاول رئيسي',
-    'consultant': 'استشاري'
-  };
-  doc.text(`نوع العميل: ${clientTypeLabels[client.type] || client.type}`, 20, yPosition);
-  yPosition += 10;
-  doc.text(`تاريخ الإنشاء: ${formatDate(operation.createdAt)}`, 20, yPosition);
-  yPosition += 15;
-
-  // الملخص المالي
-  const executedAmount = calculateExecutedTotal(operation.items);
   const totalDeductions = calculateTotalDeductions(operation);
   const netAmount = calculateNetAmount(operation);
-  const remainingAmount = netAmount - operation.totalReceived;
+  const executedAmount = calculateExecutedTotal(operation.items);
 
-  doc.setFontSize(14);
-  doc.text('الملخص المالي:', 20, yPosition);
-  yPosition += 10;
-  
-  doc.setFontSize(11);
-  doc.text(`إجمالي القيمة: ${formatCurrency(operation.totalAmount)}`, 30, yPosition);
-  yPosition += 8;
-  doc.text(`المبلغ المنفذ: ${formatCurrency(executedAmount)}`, 30, yPosition);
-  yPosition += 8;
-  doc.text(`إجمالي الخصومات: ${formatCurrency(totalDeductions)}`, 30, yPosition);
-  yPosition += 8;
-  doc.text(`الصافي المستحق: ${formatCurrency(netAmount)}`, 30, yPosition);
-  yPosition += 8;
-  doc.text(`المبلغ المحصل: ${formatCurrency(operation.totalReceived)}`, 30, yPosition);
-  yPosition += 8;
-  doc.text(`المبلغ المتبقي: ${formatCurrency(remainingAmount)}`, 30, yPosition);
-  yPosition += 8;
-  doc.text(`نسبة الإنجاز: ${operation.overallExecutionPercentage.toFixed(1)}%`, 30, yPosition);
-  yPosition += 15;
+  const content = `
+    <div class="summary">
+      <h3>معلومات العملية</h3>
+      <p><strong>كود العملية:</strong> ${operation.code}</p>
+      <p><strong>اسم العملية:</strong> ${operation.name}</p>
+      <p><strong>العميل:</strong> ${client.name}</p>
+      <p><strong>تاريخ الإنشاء:</strong> ${formatDate(operation.createdAt)}</p>
+      <p><strong>الحالة:</strong> ${operation.status === 'completed' ? 'مكتملة' : operation.status === 'completed_partial_payment' ? 'مكتملة - دفع جزئي' : operation.status === 'completed_full_payment' ? 'مكتملة ومدفوعة بالكامل' : 'قيد التنفيذ'}</p>
+    </div>
 
-  // بنود العملية
-  if (operation.items.length > 0) {
-    doc.setFontSize(14);
-    doc.text('بنود العملية:', 20, yPosition);
-    yPosition += 10;
+    <div class="summary">
+      <h3>الملخص المالي</h3>
+      <p><strong>القيمة الإجمالية:</strong> ${formatCurrency(operation.totalAmount)}</p>
+      <p><strong>المبلغ المنفذ:</strong> ${formatCurrency(executedAmount)}</p>
+      <p><strong>إجمالي الخصومات:</strong> ${formatCurrency(totalDeductions)}</p>
+      <p><strong>الصافي المستحق:</strong> ${formatCurrency(netAmount)}</p>
+      <p><strong>المبلغ المحصل:</strong> ${formatCurrency(operation.totalReceived)}</p>
+      <p><strong>المبلغ المتبقي:</strong> ${formatCurrency(netAmount - operation.totalReceived)}</p>
+      <p><strong>نسبة التنفيذ:</strong> ${operation.overallExecutionPercentage.toFixed(1)}%</p>
+    </div>
 
-    const itemsData = operation.items.map(item => [
-      item.code,
-      formatArabicText(item.description),
-      formatCurrency(item.amount),
-      `${item.executionPercentage}%`,
-      formatCurrency(item.amount * (item.executionPercentage / 100))
-    ]);
+    <h3>بنود العملية</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>الكود</th>
+          <th>الوصف</th>
+          <th>القيمة</th>
+          <th>نسبة التنفيذ</th>
+          <th>القيمة المنفذة</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${operation.items.map(item => `
+          <tr>
+            <td>${item.code}</td>
+            <td>${item.description}</td>
+            <td>${formatCurrency(item.amount)}</td>
+            <td>${item.executionPercentage}%</td>
+            <td>${formatCurrency(item.amount * (item.executionPercentage / 100))}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
 
-    (doc as any).autoTable({
-      head: [['الكود', 'الوصف', 'القيمة', 'نسبة التنفيذ', 'القيمة المنفذة']],
-      body: itemsData,
-      startY: yPosition,
-      styles: {
-        fontSize: 9,
-        cellPadding: 3,
-        halign: 'right',
-        font: 'helvetica'
-      },
-      headStyles: {
-        fillColor: [66, 139, 202],
-        textColor: 255,
-        fontSize: 10,
-        fontStyle: 'bold',
-        halign: 'right'
-      },
-      alternateRowStyles: {
-        fillColor: [245, 245, 245]
-      },
-      tableLineColor: [200, 200, 200],
-      tableLineWidth: 0.1
-    });
+    ${operation.deductions.length > 0 ? `
+      <h3>الخصومات</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>اسم الخصم</th>
+            <th>النوع</th>
+            <th>القيمة</th>
+            <th>المبلغ المخصوم</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${operation.deductions.filter(d => d.isActive).map(deduction => {
+            const deductionAmount = deduction.type === 'percentage' 
+              ? (executedAmount * deduction.value / 100)
+              : deduction.value;
+            return `
+              <tr>
+                <td>${deduction.name}</td>
+                <td>${deduction.type === 'percentage' ? 'نسبة مئوية' : 'مبلغ ثابت'}</td>
+                <td>${deduction.type === 'percentage' ? deduction.value + '%' : formatCurrency(deduction.value)}</td>
+                <td>${formatCurrency(deductionAmount)}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    ` : ''}
 
-    yPosition = (doc as any).lastAutoTable.finalY + 15;
-  }
+    ${operation.receivedPayments.length > 0 ? `
+      <h3>المدفوعات المستلمة</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>النوع</th>
+            <th>المبلغ</th>
+            <th>التاريخ</th>
+            <th>التفاصيل</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${operation.receivedPayments.map(payment => `
+            <tr>
+              <td>${payment.type === 'cash' ? 'نقدي' : 'شيك'}</td>
+              <td>${formatCurrency(payment.amount)}</td>
+              <td>${formatDate(payment.date)}</td>
+              <td>${payment.type === 'check' && payment.checkNumber ? `شيك رقم: ${payment.checkNumber}` : payment.notes || '-'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    ` : ''}
+  `;
 
-  const fileName = `تفاصيل-العملية-${operation.code}-${new Date().toISOString().split('T')[0]}.pdf`;
-  doc.save(fileName);
+  exportAsHTMLToPDF(`تفاصيل العملية - ${operation.name}`, content);
 };
 
-// تصدير تفاصيل العملية إلى Word
-export const exportOperationDetailsToWord = (operation: Operation, client: Client) => {
-  const executedAmount = calculateExecutedTotal(operation.items);
-  const totalDeductions = calculateTotalDeductions(operation);
-  const netAmount = calculateNetAmount(operation);
-  const remainingAmount = netAmount - operation.totalReceived;
-
-  const clientTypeLabels = {
-    'owner': 'مالك',
-    'main_contractor': 'مقاول رئيسي',
-    'consultant': 'استشاري'
+// باقي دوال التصدير بنفس الطريقة...
+export const exportOperationsToExcel = (operations: Operation[], clients: Client[], title = 'تقرير العمليات') => {
+  const getClientName = (clientId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    return client ? client.name : 'عميل غير معروف';
   };
 
-  const content = [
-    {
-      type: 'summary',
-      title: 'معلومات العملية',
-      items: [
-        { label: 'اسم العملية', value: operation.name },
-        { label: 'كود العملية', value: operation.code },
-        { label: 'العميل', value: client.name },
-        { label: 'نوع العميل', value: clientTypeLabels[client.type] || client.type },
-        { label: 'تاريخ الإنشاء', value: formatDate(operation.createdAt) }
-      ]
-    },
-    {
-      type: 'summary',
-      title: 'الملخص المالي',
-      items: [
-        { label: 'إجمالي القيمة', value: `<span class="currency">${formatCurrency(operation.totalAmount)}</span>` },
-        { label: 'المبلغ المنفذ', value: `<span class="currency">${formatCurrency(executedAmount)}</span>` },
-        { label: 'إجمالي الخصومات', value: `<span class="currency">${formatCurrency(totalDeductions)}</span>` },
-        { label: 'الصافي المستحق', value: `<span class="currency">${formatCurrency(netAmount)}</span>` },
-        { label: 'المبلغ المحصل', value: `<span class="currency">${formatCurrency(operation.totalReceived)}</span>` },
-        { label: 'المبلغ المتبقي', value: `<span class="currency">${formatCurrency(remainingAmount)}</span>` },
-        { label: 'نسبة الإنجاز', value: `${operation.overallExecutionPercentage.toFixed(1)}%` }
-      ]
-    }
-  ];
-
-  // إضافة بنود العملية
-  if (operation.items.length > 0) {
-    content.push({
-      type: 'table',
-      title: 'بنود العملية',
-      headers: ['الكود', 'الوصف', 'القيمة', 'نسبة التنفيذ', 'القيمة المنفذة'],
-      rows: operation.items.map(item => [
-        item.code,
-        item.description,
-        `<span class="currency">${formatCurrency(item.amount)}</span>`,
-        `${item.executionPercentage}%`,
-        `<span class="currency">${formatCurrency(item.amount * (item.executionPercentage / 100))}</span>`
-      ])
-    });
-  }
-
-  // إضافة الخصومات
-  if (operation.deductions.length > 0 && totalDeductions > 0) {
-    content.push({
-      type: 'table',
-      title: 'الخصومات',
-      headers: ['اسم الخصم', 'النوع', 'المبلغ'],
-      rows: operation.deductions.filter(d => d.isActive).map(deduction => {
-        const deductionAmount = deduction.type === 'percentage' 
-          ? (executedAmount * deduction.value / 100)
-          : deduction.value;
-        
-        return [
-          deduction.name,
-          deduction.type === 'percentage' ? `${deduction.value}%` : 'مبلغ ثابت',
-          `<span class="currency">${formatCurrency(deductionAmount)}</span>`
-        ];
-      })
-    });
-  }
-
-  // إضافة شيكات الضمان
-  if (operation.guaranteeChecks.length > 0) {
-    content.push({
-      type: 'table',
-      title: 'شيكات الضمان',
-      headers: ['رقم الشيك', 'المبلغ', 'البنك', 'تاريخ الانتهاء', 'الحالة'],
-      rows: operation.guaranteeChecks.map(check => [
-        check.checkNumber,
-        `<span class="currency">${formatCurrency(check.amount)}</span>`,
-        check.bank,
-        formatDate(check.expiryDate),
-        check.isReturned ? '<span class="status-inactive">مُسترد</span>' : '<span class="status-active">قائم</span>'
-      ])
-    });
-  }
-
-  // إضافة خطابات الضمان
-  if (operation.guaranteeLetters.length > 0) {
-    content.push({
-      type: 'table',
-      title: 'خطابات الضمان',
-      headers: ['رقم الخطاب', 'البنك', 'المبلغ', 'تاريخ الاستحقاق', 'الحالة'],
-      rows: operation.guaranteeLetters.map(letter => [
-        letter.letterNumber,
-        letter.bank,
-        `<span class="currency">${formatCurrency(letter.amount)}</span>`,
-        formatDate(letter.dueDate),
-        letter.isReturned ? '<span class="status-inactive">مُسترد</span>' : '<span class="status-active">قائم</span>'
-      ])
-    });
-  }
-
-  // إضافة شهادات الضمان
-  if ((operation.warrantyCertificates || []).length > 0) {
-    content.push({
-      type: 'table',
-      title: 'شهادات الضمان',
-      headers: ['رقم الشهادة', 'الوصف', 'تاريخ البداية', 'تاريخ النهاية', 'الحالة'],
-      rows: operation.warrantyCertificates!.map(warranty => [
-        warranty.certificateNumber,
-        warranty.description,
-        formatDate(warranty.startDate),
-        formatDate(warranty.endDate),
-        warranty.isActive ? '<span class="status-active">نشط</span>' : '<span class="status-inactive">منتهي</span>'
-      ])
-    });
-  }
-
-  // إضافة المدفوعات المستلمة
-  if (operation.receivedPayments.length > 0) {
-    content.push({
-      type: 'table',
-      title: 'المدفوعات المستلمة',
-      headers: ['النوع', 'المبلغ', 'التاريخ', 'التفاصيل'],
-      rows: operation.receivedPayments.map(payment => [
-        payment.type === 'cash' ? 'نقدي' : 'شيك',
-        `<span class="currency">${formatCurrency(payment.amount)}</span>`,
-        formatDate(payment.date),
-        payment.type === 'check' && payment.checkNumber 
-          ? `شيك رقم: ${payment.checkNumber} - ${payment.bank}` 
-          : payment.notes || '-'
-      ])
-    });
-  }
-
-  const blob = createWordDocument(`تفاصيل العملية: ${operation.name}`, content);
-  const fileName = `تفاصيل-العملية-${operation.code}-${new Date().toISOString().split('T')[0]}.doc`;
-  saveWordDocument(blob, fileName);
-};
-
-// تصدير العمليات إلى PDF
-export const exportOperationsToPDF = (operations: Operation[], clients: Client[], title: string = 'تقرير العمليات') => {
-  const doc = new jsPDF({
-    orientation: 'landscape',
-    unit: 'mm',
-    format: 'a4'
-  });
-  
-  setupArabicPDFFont(doc);
-
-  // العنوان
-  doc.setFontSize(16);
-  doc.text(formatArabicText(title), doc.internal.pageSize.getWidth() / 2, 20, { align: 'center' });
-  
-  // تاريخ التقرير
-  doc.setFontSize(10);
-  const dateText = `تاريخ التقرير: ${formatDate(new Date())}`;
-  doc.text(dateText, 20, 35);
-
-  // إعداد البيانات للجدول
-  const tableData = operations.map(operation => {
-    const client = clients.find(c => c.id === operation.clientId);
-    const statusLabels = {
-      'in_progress': 'قيد التنفيذ',
-      'completed': 'مكتملة',
-      'completed_partial_payment': 'مكتملة - دفع جزئي'
-    };
-
-    const totalDeductions = calculateTotalDeductions(operation);
-    const netAmount = calculateNetAmount(operation);
-
-    return [
-      operation.code,
-      formatArabicText(operation.name),
-      formatArabicText(client?.name || 'غير معروف'),
-      formatCurrency(operation.totalAmount),
-      formatCurrency(totalDeductions),
-      formatCurrency(netAmount),
-      formatCurrency(operation.totalReceived),
-      `${operation.overallExecutionPercentage.toFixed(1)}%`,
-      statusLabels[operation.status],
-      formatDate(operation.createdAt)
-    ];
-  });
-
-  // إعداد الجدول
-  (doc as any).autoTable({
-    head: [['الكود', 'اسم العملية', 'العميل', 'إجمالي القيمة', 'الخصومات', 'الصافي المستحق', 'المحصل', 'نسبة الإنجاز', 'الحالة', 'تاريخ الإنشاء']],
-    body: tableData,
-    startY: 45,
-    styles: {
-      fontSize: 7,
-      cellPadding: 2,
-      overflow: 'linebreak',
-      halign: 'right',
-      font: 'helvetica'
-    },
-    headStyles: {
-      fillColor: [66, 139, 202],
-      textColor: 255,
-      fontSize: 8,
-      fontStyle: 'bold',
-      halign: 'right'
-    },
-    alternateRowStyles: {
-      fillColor: [245, 245, 245]
-    },
-    margin: { top: 45, right: 10, bottom: 20, left: 10 },
-    tableWidth: 'auto',
-    columnStyles: {
-      0: { cellWidth: 25 },
-      1: { cellWidth: 35 },
-      2: { cellWidth: 30 },
-      3: { cellWidth: 25 },
-      4: { cellWidth: 25 },
-      5: { cellWidth: 25 },
-      6: { cellWidth: 25 },
-      7: { cellWidth: 20 },
-      8: { cellWidth: 25 },
-      9: { cellWidth: 20 }
-    }
-  });
-
-  // إضافة إحصائيات في النهاية
-  const finalY = (doc as any).lastAutoTable.finalY + 20;
-  const totalAmount = operations.reduce((sum, op) => sum + op.totalAmount, 0);
-  const totalDeductions = operations.reduce((sum, op) => sum + calculateTotalDeductions(op), 0);
-  const totalNetAmount = operations.reduce((sum, op) => sum + calculateNetAmount(op), 0);
-  const totalReceived = operations.reduce((sum, op) => sum + op.totalReceived, 0);
-  const completedCount = operations.filter(op => op.status === 'completed').length;
-
-  doc.setFontSize(12);
-  doc.text('ملخص الإحصائيات:', 20, finalY);
-  doc.setFontSize(10);
-  doc.text(`إجمالي العمليات: ${operations.length}`, 20, finalY + 10);
-  doc.text(`العمليات المكتملة: ${completedCount}`, 20, finalY + 20);
-  doc.text(`إجمالي القيمة: ${formatCurrency(totalAmount)}`, 20, finalY + 30);
-  doc.text(`إجمالي الخصومات: ${formatCurrency(totalDeductions)}`, 20, finalY + 40);
-  doc.text(`إجمالي الصافي المستحق: ${formatCurrency(totalNetAmount)}`, 20, finalY + 50);
-  doc.text(`إجمالي المحصل: ${formatCurrency(totalReceived)}`, 20, finalY + 60);
-
-  const fileName = `تقرير-العمليات-${new Date().toISOString().split('T')[0]}.pdf`;
-  doc.save(fileName);
-};
-
-// تصدير العمليات إلى Word
-export const exportOperationsToWord = (operations: Operation[], clients: Client[], title: string = 'تقرير العمليات') => {
-  const totalAmount = operations.reduce((sum, op) => sum + op.totalAmount, 0);
-  const totalDeductions = operations.reduce((sum, op) => sum + calculateTotalDeductions(op), 0);
-  const totalNetAmount = operations.reduce((sum, op) => sum + calculateNetAmount(op), 0);
-  const totalReceived = operations.reduce((sum, op) => sum + op.totalReceived, 0);
-  const completedCount = operations.filter(op => op.status === 'completed').length;
-
-  const content = [
-    {
-      type: 'summary',
-      title: 'ملخص الإحصائيات',
-      items: [
-        { label: 'إجمالي العمليات', value: operations.length.toString() },
-        { label: 'العمليات المكتملة', value: completedCount.toString() },
-        { label: 'إجمالي القيمة', value: `<span class="currency">${formatCurrency(totalAmount)}</span>` },
-        { label: 'إجمالي الخصومات', value: `<span class="currency">${formatCurrency(totalDeductions)}</span>` },
-        { label: 'إجمالي الصافي المستحق', value: `<span class="currency">${formatCurrency(totalNetAmount)}</span>` },
-        { label: 'إجمالي المحصل', value: `<span class="currency">${formatCurrency(totalReceived)}</span>` }
-      ]
-    },
-    {
-      type: 'table',
-      title: 'تفاصيل العمليات',
-      headers: ['الكود', 'اسم العملية', 'العميل', 'إجمالي القيمة', 'الخصومات', 'الصافي المستحق', 'المحصل', 'نسبة الإنجاز', 'الحالة', 'تاريخ الإنشاء'],
-      rows: operations.map(operation => {
-        const client = clients.find(c => c.id === operation.clientId);
-        const statusLabels = {
-          'in_progress': '<span class="status-pending">قيد التنفيذ</span>',
-          'completed': '<span class="status-active">مكتملة</span>',
-          'completed_partial_payment': '<span class="status-pending">مكتملة - دفع جزئي</span>'
-        };
-
-        const totalDeductions = calculateTotalDeductions(operation);
-        const netAmount = calculateNetAmount(operation);
-
-        return [
-          operation.code,
-          operation.name,
-          client?.name || 'غير معروف',
-          `<span class="currency">${formatCurrency(operation.totalAmount)}</span>`,
-          `<span class="currency">${formatCurrency(totalDeductions)}</span>`,
-          `<span class="currency">${formatCurrency(netAmount)}</span>`,
-          `<span class="currency">${formatCurrency(operation.totalReceived)}</span>`,
-          `${operation.overallExecutionPercentage.toFixed(1)}%`,
-          statusLabels[operation.status],
-          formatDate(operation.createdAt)
-        ];
-      })
-    }
-  ];
-
-  const blob = createWordDocument(title, content);
-  const fileName = `تقرير-العمليات-${new Date().toISOString().split('T')[0]}.doc`;
-  saveWordDocument(blob, fileName);
-};
-
-// تصدير الشيكات والمدفوعات إلى PDF
-export const exportChecksAndPaymentsToPDF = (operations: Operation[], clients: Client[]) => {
-  const doc = new jsPDF({
-    orientation: 'landscape',
-    unit: 'mm',
-    format: 'a4'
-  });
-  
-  setupArabicPDFFont(doc);
-
-  // العنوان
-  doc.setFontSize(16);
-  const titleText = 'تقرير الشيكات والمدفوعات';
-  doc.text(formatArabicText(titleText), doc.internal.pageSize.getWidth() / 2, 20, { align: 'center' });
-  
-  // تاريخ التقرير
-  doc.setFontSize(10);
-  const dateText = `تاريخ التقرير: ${formatDate(new Date())}`;
-  doc.text(dateText, 20, 35);
-
-  let yPosition = 50;
-
-  // جمع جميع المدفوعات
-  const allPayments = operations.flatMap(operation => 
-    operation.receivedPayments.map(payment => {
-      const client = clients.find(c => c.id === operation.clientId);
-      return {
-        ...payment,
-        operationName: operation.name,
-        operationCode: operation.code,
-        clientName: client?.name || 'غير معروف'
-      };
-    })
-  );
-
-  if (allPayments.length > 0) {
-    doc.setFontSize(14);
-    doc.text('المدفوعات المستلمة:', 20, yPosition);
-    yPosition += 10;
-
-    const paymentsData = allPayments.map(payment => [
-      payment.type === 'cash' ? 'نقدي' : 'شيك',
-      formatCurrency(payment.amount),
-      formatDate(payment.date),
-      formatArabicText(payment.clientName),
-      formatArabicText(payment.operationName),
-      payment.type === 'check' && payment.checkNumber 
-        ? `${payment.checkNumber} - ${formatArabicText(payment.bank || '')}`
-        : formatArabicText(payment.notes || '-')
-    ]);
-
-    (doc as any).autoTable({
-      head: [['النوع', 'المبلغ', 'التاريخ', 'العميل', 'العملية', 'التفاصيل']],
-      body: paymentsData,
-      startY: yPosition,
-      styles: {
-        fontSize: 8,
-        cellPadding: 3,
-        halign: 'right',
-        font: 'helvetica'
-      },
-      headStyles: {
-        fillColor: [0, 128, 0],
-        textColor: 255,
-        fontSize: 9,
-        fontStyle: 'bold',
-        halign: 'right'
-      },
-      alternateRowStyles: {
-        fillColor: [245, 245, 245]
-      }
-    });
-
-    yPosition = (doc as any).lastAutoTable.finalY + 20;
-  }
-
-  // إضافة إحصائيات
-  const totalAmount = allPayments.reduce((sum, payment) => sum + payment.amount, 0);
-  const totalChecks = allPayments.filter(p => p.type === 'check').length;
-  const totalCash = allPayments.filter(p => p.type === 'cash').length;
-
-  doc.setFontSize(12);
-  doc.text('ملخص الإحصائيات:', 20, yPosition);
-  doc.setFontSize(10);
-  doc.text(`إجمالي المدفوعات: ${formatCurrency(totalAmount)}`, 20, yPosition + 10);
-  doc.text(`عدد الشيكات: ${totalChecks}`, 20, yPosition + 20);
-  doc.text(`المدفوعات النقدية: ${totalCash}`, 20, yPosition + 30);
-
-  const fileName = `تقرير-الشيكات-والمدفوعات-${new Date().toISOString().split('T')[0]}.pdf`;
-  doc.save(fileName);
-};
-
-// تصدير الشيكات والمدفوعات إلى Word
-export const exportChecksAndPaymentsToWord = (operations: Operation[], clients: Client[]) => {
-  // جمع جميع المدفوعات
-  const allPayments = operations.flatMap(operation => 
-    operation.receivedPayments.map(payment => {
-      const client = clients.find(c => c.id === operation.clientId);
-      return {
-        ...payment,
-        operationName: operation.name,
-        operationCode: operation.code,
-        clientName: client?.name || 'غير معروف'
-      };
-    })
-  );
-
-  const totalAmount = allPayments.reduce((sum, payment) => sum + payment.amount, 0);
-  const totalChecks = allPayments.filter(p => p.type === 'check').length;
-  const totalCash = allPayments.filter(p => p.type === 'cash').length;
-
-  const content = [
-    {
-      type: 'summary',
-      title: 'ملخص الإحصائيات',
-      items: [
-        { label: 'إجمالي المدفوعات', value: `<span class="currency">${formatCurrency(totalAmount)}</span>` },
-        { label: 'عدد الشيكات', value: totalChecks.toString() },
-        { label: 'المدفوعات النقدية', value: totalCash.toString() }
-      ]
-    },
-    {
-      type: 'table',
-      title: 'تفاصيل المدفوعات',
-      headers: ['النوع', 'المبلغ', 'التاريخ', 'العميل', 'العملية', 'التفاصيل'],
-      rows: allPayments.map(payment => [
-        payment.type === 'cash' ? 'نقدي' : 'شيك',
-        `<span class="currency">${formatCurrency(payment.amount)}</span>`,
-        formatDate(payment.date),
-        payment.clientName,
-        payment.operationName,
-        payment.type === 'check' && payment.checkNumber 
-          ? `شيك رقم: ${payment.checkNumber} - ${payment.bank || ''}`
-          : payment.notes || '-'
-      ])
-    }
-  ];
-
-  const blob = createWordDocument('تقرير الشيكات والمدفوعات', content);
-  const fileName = `تقرير-الشيكات-والمدفوعات-${new Date().toISOString().split('T')[0]}.doc`;
-  saveWordDocument(blob, fileName);
-};
-
-// تصدير الشيكات والمدفوعات إلى Excel
-export const exportChecksAndPaymentsToExcel = (operations: Operation[], clients: Client[]) => {
-  // جمع جميع المدفوعات
-  const allPayments = operations.flatMap(operation => 
-    operation.receivedPayments.map(payment => {
-      const client = clients.find(c => c.id === operation.clientId);
-      return {
-        'نوع الدفع': payment.type === 'cash' ? 'نقدي' : 'شيك',
-        'المبلغ': payment.amount,
-        'التاريخ': formatDate(payment.date),
-        'العميل': client?.name || 'غير معروف',
-        'العملية': operation.name,
-        'كود العملية': operation.code,
-        'رقم الشيك': payment.checkNumber || '',
-        'البنك': payment.bank || '',
-        'تاريخ الاستلام': payment.receiptDate ? formatDate(payment.receiptDate) : '',
-        'ملاحظات': payment.notes || ''
-      };
-    })
-  );
-
-  const worksheet = XLSX.utils.json_to_sheet(allPayments);
-  worksheet['!cols'] = [
-    { wch: 12 }, // نوع الدفع
-    { wch: 15 }, // المبلغ
-    { wch: 12 }, // التاريخ
-    { wch: 25 }, // العميل
-    { wch: 30 }, // العملية
-    { wch: 15 }, // كود العملية
-    { wch: 15 }, // رقم الشيك
-    { wch: 20 }, // البنك
-    { wch: 15 }, // تاريخ الاستلام
-    { wch: 30 }  // ملاحظات
-  ];
-
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'الشيكات والمدفوعات');
-
-  // إضافة ورقة الإحصائيات
-  const stats = [
-    { 'البند': 'إجمالي المدفوعات', 'القيمة': allPayments.reduce((sum, p) => sum + p.المبلغ, 0) },
-    { 'البند': 'عدد الشيكات', 'القيمة': allPayments.filter(p => p['نوع الدفع'] === 'شيك').length },
-    { 'البند': 'المدفوعات النقدية', 'القيمة': allPayments.filter(p => p['نوع الدفع'] === 'نقدي').length }
-  ];
-
-  const statsWorksheet = XLSX.utils.json_to_sheet(stats);
-  statsWorksheet['!cols'] = [{ wch: 20 }, { wch: 20 }];
-  XLSX.utils.book_append_sheet(workbook, statsWorksheet, 'الإحصائيات');
-
-  const fileName = `تقرير-الشيكات-والمدفوعات-${new Date().toISOString().split('T')[0]}.xlsx`;
-  XLSX.writeFile(workbook, fileName);
-};
-
-// تصدير تقرير مفصل للضمانات
-export const exportDetailedGuaranteesReportToPDF = (operations: Operation[], clients: Client[]) => {
-  const doc = new jsPDF({
-    orientation: 'landscape',
-    unit: 'mm',
-    format: 'a4'
-  });
-  
-  setupArabicPDFFont(doc);
-
-  // العنوان
-  doc.setFontSize(16);
-  const titleText = 'تقرير الضمانات المفصل';
-  doc.text(formatArabicText(titleText), doc.internal.pageSize.getWidth() / 2, 20, { align: 'center' });
-  
-  // تاريخ التقرير
-  doc.setFontSize(10);
-  const dateText = `تاريخ التقرير: ${formatDate(new Date())}`;
-  doc.text(dateText, 20, 35);
-
-  let yPosition = 50;
-
-  // تقرير شيكات الضمان
-  doc.setFontSize(14);
-  doc.text('شيكات الضمان:', 20, yPosition);
-  yPosition += 10;
-
-  // جمع جميع شيكات الضمان
-  const allGuaranteeChecks = operations.flatMap(operation => 
-    operation.guaranteeChecks.map(check => {
-      const client = clients.find(c => c.id === operation.clientId);
-      const relatedItem = check.relatedTo === 'item' && check.relatedItemId 
-        ? operation.items.find(item => item.id === check.relatedItemId)
-        : null;
-      
-      return {
-        ...check,
-        operationName: operation.name,
-        operationCode: operation.code,
-        clientName: client?.name || 'غير معروف',
-        relatedItemDescription: relatedItem?.description || 'العملية كاملة'
-      };
-    })
-  );
-
-  if (allGuaranteeChecks.length > 0) {
-    const checksTableData = allGuaranteeChecks.map(check => [
-      check.checkNumber,
-      formatArabicText(check.clientName),
-      formatArabicText(check.operationName),
-      formatArabicText(check.relatedItemDescription),
-      formatCurrency(check.amount),
-      formatDate(check.checkDate),
-      formatDate(check.expiryDate),
-      formatArabicText(check.bank),
-      check.isReturned ? 'مُسترد' : 'قائم'
-    ]);
-
-    (doc as any).autoTable({
-      head: [['رقم الشيك', 'العميل', 'العملية', 'البند', 'المبلغ', 'تاريخ الإصدار', 'تاريخ الانتهاء', 'البنك', 'الحالة']],
-      body: checksTableData,
-      startY: yPosition,
-      styles: {
-        fontSize: 7,
-        cellPadding: 2,
-        overflow: 'linebreak',
-        halign: 'right',
-        font: 'helvetica'
-      },
-      headStyles: {
-        fillColor: [66, 139, 202],
-        textColor: 255,
-        fontSize: 8,
-        fontStyle: 'bold',
-        halign: 'right'
-      },
-      alternateRowStyles: {
-        fillColor: [245, 245, 245]
-      },
-      columnStyles: {
-        0: { cellWidth: 25 },
-        1: { cellWidth: 30 },
-        2: { cellWidth: 35 },
-        3: { cellWidth: 35 },
-        4: { cellWidth: 25 },
-        5: { cellWidth: 25 },
-        6: { cellWidth: 25 },
-        7: { cellWidth: 25 },
-        8: { cellWidth: 20 }
-      }
-    });
-
-    yPosition = (doc as any).lastAutoTable.finalY + 20;
-  }
-
-  // إضافة صفحة جديدة إذا لزم الأمر
-  if (yPosition > 180) {
-    doc.addPage();
-    yPosition = 30;
-  }
-
-  // تقرير خطابات الضمان
-  doc.setFontSize(14);
-  doc.text('خطابات الضمان:', 20, yPosition);
-  yPosition += 10;
-
-  // جمع جميع خطابات الضمان
-  const allGuaranteeLetters = operations.flatMap(operation => 
-    operation.guaranteeLetters.map(letter => {
-      const client = clients.find(c => c.id === operation.clientId);
-      const relatedItem = letter.relatedTo === 'item' && letter.relatedItemId 
-        ? operation.items.find(item => item.id === letter.relatedItemId)
-        : null;
-      
-      return {
-        ...letter,
-        operationName: operation.name,
-        operationCode: operation.code,
-        clientName: client?.name || 'غير معروف',
-        relatedItemDescription: relatedItem?.description || 'العملية كاملة'
-      };
-    })
-  );
-
-  if (allGuaranteeLetters.length > 0) {
-    const lettersTableData = allGuaranteeLetters.map(letter => [
-      letter.letterNumber,
-      formatArabicText(letter.clientName),
-      formatArabicText(letter.operationName),
-      formatArabicText(letter.relatedItemDescription),
-      formatCurrency(letter.amount),
-      formatDate(letter.letterDate),
-      formatDate(letter.dueDate),
-      formatArabicText(letter.bank),
-      letter.isReturned ? 'مُسترد' : 'قائم'
-    ]);
-
-    (doc as any).autoTable({
-      head: [['رقم الخطاب', 'العميل', 'العملية', 'البند', 'المبلغ', 'تاريخ الإصدار', 'تاريخ الاستحقاق', 'البنك', 'الحالة']],
-      body: lettersTableData,
-      startY: yPosition,
-      styles: {
-        fontSize: 7,
-        cellPadding: 2,
-        overflow: 'linebreak',
-        halign: 'right',
-        font: 'helvetica'
-      },
-      headStyles: {
-        fillColor: [139, 69, 19],
-        textColor: 255,
-        fontSize: 8,
-        fontStyle: 'bold',
-        halign: 'right'
-      },
-      alternateRowStyles: {
-        fillColor: [245, 245, 245]
-      },
-      columnStyles: {
-        0: { cellWidth: 25 },
-        1: { cellWidth: 30 },
-        2: { cellWidth: 35 },
-        3: { cellWidth: 35 },
-        4: { cellWidth: 25 },
-        5: { cellWidth: 25 },
-        6: { cellWidth: 25 },
-        7: { cellWidth: 25 },
-        8: { cellWidth: 20 }
-      }
-    });
-  }
-
-  const fileName = `تقرير-الضمانات-المفصل-${new Date().toISOString().split('T')[0]}.pdf`;
-  doc.save(fileName);
-};
-
-// تصدير تقرير مفصل للضمانات إلى Word
-export const exportDetailedGuaranteesReportToWord = (operations: Operation[], clients: Client[]) => {
-  // جمع جميع شيكات الضمان
-  const allGuaranteeChecks = operations.flatMap(operation => 
-    operation.guaranteeChecks.map(check => {
-      const client = clients.find(c => c.id === operation.clientId);
-      const relatedItem = check.relatedTo === 'item' && check.relatedItemId 
-        ? operation.items.find(item => item.id === check.relatedItemId)
-        : null;
-      
-      return {
-        ...check,
-        operationName: operation.name,
-        operationCode: operation.code,
-        clientName: client?.name || 'غير معروف',
-        relatedItemDescription: relatedItem?.description || 'العملية كاملة'
-      };
-    })
-  );
-
-  // جمع جميع خطابات الضمان
-  const allGuaranteeLetters = operations.flatMap(operation => 
-    operation.guaranteeLetters.map(letter => {
-      const client = clients.find(c => c.id === operation.clientId);
-      const relatedItem = letter.relatedTo === 'item' && letter.relatedItemId 
-        ? operation.items.find(item => item.id === letter.relatedItemId)
-        : null;
-      
-      return {
-        ...letter,
-        operationName: operation.name,
-        operationCode: operation.code,
-        clientName: client?.name || 'غير معروف',
-        relatedItemDescription: relatedItem?.description || 'العملية كاملة'
-      };
-    })
-  );
-
-  const content = [
-    {
-      type: 'summary',
-      title: 'ملخص الضمانات',
-      items: [
-        { label: 'إجمالي شيكات الضمان', value: allGuaranteeChecks.length.toString() },
-        { label: 'إجمالي خطابات الضمان', value: allGuaranteeLetters.length.toString() },
-        { label: 'الضمانات النشطة', value: (allGuaranteeChecks.filter(c => !c.isReturned).length + allGuaranteeLetters.filter(l => !l.isReturned).length).toString() },
-        { label: 'الضمانات المستردة', value: (allGuaranteeChecks.filter(c => c.isReturned).length + allGuaranteeLetters.filter(l => l.isReturned).length).toString() }
-      ]
-    }
-  ];
-
-  // إضافة جدول شيكات الضمان
-  if (allGuaranteeChecks.length > 0) {
-    content.push({
-      type: 'table',
-      title: 'شيكات الضمان',
-      headers: ['رقم الشيك', 'العميل', 'العملية', 'البند', 'المبلغ', 'تاريخ الإصدار', 'تاريخ الانتهاء', 'البنك', 'الحالة'],
-      rows: allGuaranteeChecks.map(check => [
-        check.checkNumber,
-        check.clientName,
-        check.operationName,
-        check.relatedItemDescription,
-        `<span class="currency">${formatCurrency(check.amount)}</span>`,
-        formatDate(check.checkDate),
-        formatDate(check.expiryDate),
-        check.bank,
-        check.isReturned ? '<span class="status-inactive">مُسترد</span>' : '<span class="status-active">قائم</span>'
-      ])
-    });
-  }
-
-  // إضافة جدول خطابات الضمان
-  if (allGuaranteeLetters.length > 0) {
-    content.push({
-      type: 'table',
-      title: 'خطابات الضمان',
-      headers: ['رقم الخطاب', 'العميل', 'العملية', 'البند', 'المبلغ', 'تاريخ الإصدار', 'تاريخ الاستحقاق', 'البنك', 'الحالة'],
-      rows: allGuaranteeLetters.map(letter => [
-        letter.letterNumber,
-        letter.clientName,
-        letter.operationName,
-        letter.relatedItemDescription,
-        `<span class="currency">${formatCurrency(letter.amount)}</span>`,
-        formatDate(letter.letterDate),
-        formatDate(letter.dueDate),
-        letter.bank,
-        letter.isReturned ? '<span class="status-inactive">مُسترد</span>' : '<span class="status-active">قائم</span>'
-      ])
-    });
-  }
-
-  const blob = createWordDocument('تقرير الضمانات المفصل', content);
-  const fileName = `تقرير-الضمانات-المفصل-${new Date().toISOString().split('T')[0]}.doc`;
-  saveWordDocument(blob, fileName);
-};
-
-// تصدير الضمانات إلى Excel
-export const exportGuaranteesToExcel = (operations: Operation[], clients: Client[]) => {
-  // جمع جميع شيكات الضمان
-  const allGuaranteeChecks = operations.flatMap(operation => 
-    operation.guaranteeChecks.map(check => {
-      const client = clients.find(c => c.id === operation.clientId);
-      const relatedItem = check.relatedTo === 'item' && check.relatedItemId 
-        ? operation.items.find(item => item.id === check.relatedItemId)
-        : null;
-      
-      return {
-        'النوع': 'شيك ضمان',
-        'الرقم': check.checkNumber,
-        'المبلغ': check.amount,
-        'البنك': check.bank,
-        'العميل': client?.name || 'غير معروف',
-        'العملية': operation.name,
-        'كود العملية': operation.code,
-        'البند المرتبط': relatedItem?.description || 'العملية كاملة',
-        'تاريخ الإصدار': formatDate(check.checkDate),
-        'تاريخ التسليم': formatDate(check.deliveryDate),
-        'تاريخ الانتهاء': formatDate(check.expiryDate),
-        'الحالة': check.isReturned ? 'مُسترد' : 'قائم',
-        'تاريخ الاسترداد': check.returnDate ? formatDate(check.returnDate) : ''
-      };
-    })
-  );
-
-  // جمع جميع خطابات الضمان
-  const allGuaranteeLetters = operations.flatMap(operation => 
-    operation.guaranteeLetters.map(letter => {
-      const client = clients.find(c => c.id === operation.clientId);
-      const relatedItem = letter.relatedTo === 'item' && letter.relatedItemId 
-        ? operation.items.find(item => item.id === letter.relatedItemId)
-        : null;
-      
-      return {
-        'النوع': 'خطاب ضمان',
-        'الرقم': letter.letterNumber,
-        'المبلغ': letter.amount,
-        'البنك': letter.bank,
-        'العميل': client?.name || 'غير معروف',
-        'العملية': operation.name,
-        'كود العملية': operation.code,
-        'البند المرتبط': relatedItem?.description || 'العملية كاملة',
-        'تاريخ الإصدار': formatDate(letter.letterDate),
-        'تاريخ التسليم': '',
-        'تاريخ الانتهاء': formatDate(letter.dueDate),
-        'الحالة': letter.isReturned ? 'مُسترد' : 'قائم',
-        'تاريخ الاسترداد': letter.returnDate ? formatDate(letter.returnDate) : '',
-        'ملاحظات': letter.notes || ''
-      };
-    })
-  );
-
-  // دمج جميع الضمانات
-  const allGuarantees = [...allGuaranteeChecks, ...allGuaranteeLetters];
-
-  const worksheet = XLSX.utils.json_to_sheet(allGuarantees);
-  worksheet['!cols'] = [
-    { wch: 15 }, // النوع
-    { wch: 15 }, // الرقم
-    { wch: 15 }, // المبلغ
-    { wch: 20 }, // البنك
-    { wch: 25 }, // العميل
-    { wch: 30 }, // العملية
-    { wch: 15 }, // كود العملية
-    { wch: 30 }, // البند المرتبط
-    { wch: 12 }, // تاريخ الإصدار
-    { wch: 12 }, // تاريخ التسليم
-    { wch: 12 }, // تاريخ الانتهاء
-    { wch: 10 }, // الحالة
-    { wch: 12 }, // تاريخ الاسترداد
-    { wch: 30 }  // ملاحظات
-  ];
-
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'جميع الضمانات');
-
-  // إضافة ورقة منفصلة لشيكات الضمان
-  if (allGuaranteeChecks.length > 0) {
-    const checksWorksheet = XLSX.utils.json_to_sheet(allGuaranteeChecks);
-    checksWorksheet['!cols'] = worksheet['!cols'];
-    XLSX.utils.book_append_sheet(workbook, checksWorksheet, 'شيكات الضمان');
-  }
-
-  // إضافة ورقة منفصلة لخطابات الضمان
-  if (allGuaranteeLetters.length > 0) {
-    const lettersWorksheet = XLSX.utils.json_to_sheet(allGuaranteeLetters);
-    lettersWorksheet['!cols'] = worksheet['!cols'];
-    XLSX.utils.book_append_sheet(workbook, lettersWorksheet, 'خطابات الضمان');
-  }
-
-  // إضافة ورقة الإحصائيات
-  const stats = [
-    { 'البند': 'إجمالي الضمانات', 'القيمة': allGuarantees.length },
-    { 'البند': 'شيكات الضمان', 'القيمة': allGuaranteeChecks.length },
-    { 'البند': 'خطابات الضمان', 'القيمة': allGuaranteeLetters.length },
-    { 'البند': 'الضمانات النشطة', 'القيمة': allGuarantees.filter(g => g.الحالة === 'قائم').length },
-    { 'البند': 'الضمانات المستردة', 'القيمة': allGuarantees.filter(g => g.الحالة === 'مُسترد').length },
-    { 'البند': 'إجمالي المبلغ', 'القيمة': allGuarantees.reduce((sum, g) => sum + g.المبلغ, 0) }
-  ];
-
-  const statsWorksheet = XLSX.utils.json_to_sheet(stats);
-  statsWorksheet['!cols'] = [{ wch: 20 }, { wch: 20 }];
-  XLSX.utils.book_append_sheet(workbook, statsWorksheet, 'الإحصائيات');
-
-  const fileName = `تقرير-الضمانات-${new Date().toISOString().split('T')[0]}.xlsx`;
-  XLSX.writeFile(workbook, fileName);
-};
-
-// تصدير تقرير شهادات الضمان
-export const exportWarrantyCertificatesReportToPDF = (operations: Operation[], clients: Client[]) => {
-  const doc = new jsPDF({
-    orientation: 'landscape',
-    unit: 'mm',
-    format: 'a4'
-  });
-  
-  setupArabicPDFFont(doc);
-
-  // العنوان
-  doc.setFontSize(16);
-  const titleText = 'تقرير شهادات الضمان';
-  doc.text(formatArabicText(titleText), doc.internal.pageSize.getWidth() / 2, 20, { align: 'center' });
-  
-  // تاريخ التقرير
-  doc.setFontSize(10);
-  const dateText = `تاريخ التقرير: ${formatDate(new Date())}`;
-  doc.text(dateText, 20, 35);
-
-  // جمع جميع شهادات الضمان
-  const allWarranties = operations.flatMap(operation => 
-    (operation.warrantyCertificates || []).map(warranty => {
-      const client = clients.find(c => c.id === operation.clientId);
-      const relatedItem = warranty.relatedTo === 'item' && warranty.relatedItemId 
-        ? operation.items.find(item => item.id === warranty.relatedItemId)
-        : null;
-      
-      return {
-        ...warranty,
-        operationName: operation.name,
-        operationCode: operation.code,
-        clientName: client?.name || 'غير معروف',
-        relatedItemDescription: relatedItem?.description || 'العملية كاملة'
-      };
-    })
-  );
-
-  if (allWarranties.length > 0) {
-    const warrantyTableData = allWarranties.map(warranty => [
-      warranty.certificateNumber,
-      formatArabicText(warranty.clientName),
-      formatArabicText(warranty.operationName),
-      formatArabicText(warranty.relatedItemDescription),
-      formatArabicText(warranty.description),
-      formatDate(warranty.startDate),
-      formatDate(warranty.endDate),
-      `${warranty.warrantyPeriodMonths} شهر`,
-      warranty.isActive ? 'نشط' : 'منتهي'
-    ]);
-
-    (doc as any).autoTable({
-      head: [['رقم الشهادة', 'العميل', 'العملية', 'البند', 'الوصف', 'تاريخ البداية', 'تاريخ النهاية', 'المدة', 'الحالة']],
-      body: warrantyTableData,
-      startY: 50,
-      styles: {
-        fontSize: 7,
-        cellPadding: 2,
-        overflow: 'linebreak',
-        halign: 'right',
-        font: 'helvetica'
-      },
-      headStyles: {
-        fillColor: [34, 139, 34],
-        textColor: 255,
-        fontSize: 8,
-        fontStyle: 'bold',
-        halign: 'right'
-      },
-      alternateRowStyles: {
-        fillColor: [245, 245, 245]
-      },
-      columnStyles: {
-        0: { cellWidth: 25 },
-        1: { cellWidth: 30 },
-        2: { cellWidth: 35 },
-        3: { cellWidth: 35 },
-        4: { cellWidth: 40 },
-        5: { cellWidth: 25 },
-        6: { cellWidth: 25 },
-        7: { cellWidth: 20 },
-        8: { cellWidth: 20 }
-      }
-    });
-  } else {
-    doc.setFontSize(12);
-    doc.text('لا توجد شهادات ضمان', 20, 60);
-  }
-
-  const fileName = `تقرير-شهادات-الضمان-${new Date().toISOString().split('T')[0]}.pdf`;
-  doc.save(fileName);
-};
-
-// تصدير شهادات الضمان إلى Word
-export const exportWarrantyCertificatesReportToWord = (operations: Operation[], clients: Client[]) => {
-  // جمع جميع شهادات الضمان
-  const allWarranties = operations.flatMap(operation => 
-    (operation.warrantyCertificates || []).map(warranty => {
-      const client = clients.find(c => c.id === operation.clientId);
-      const relatedItem = warranty.relatedTo === 'item' && warranty.relatedItemId 
-        ? operation.items.find(item => item.id === warranty.relatedItemId)
-        : null;
-      
-      return {
-        ...warranty,
-        operationName: operation.name,
-        operationCode: operation.code,
-        clientName: client?.name || 'غير معروف',
-        relatedItemDescription: relatedItem?.description || 'العملية كاملة'
-      };
-    })
-  );
-
-  const content = [
-    {
-      type: 'summary',
-      title: 'ملخص شهادات الضمان',
-      items: [
-        { label: 'إجمالي الشهادات', value: allWarranties.length.toString() },
-        { label: 'الشهادات النشطة', value: allWarranties.filter(w => w.isActive).length.toString() },
-        { label: 'الشهادات المنتهية', value: allWarranties.filter(w => !w.isActive).length.toString() }
-      ]
-    }
-  ];
-
-  if (allWarranties.length > 0) {
-    content.push({
-      type: 'table',
-      title: 'تفاصيل شهادات الضمان',
-      headers: ['رقم الشهادة', 'العميل', 'العملية', 'البند', 'الوصف', 'تاريخ البداية', 'تاريخ النهاية', 'المدة', 'الحالة'],
-      rows: allWarranties.map(warranty => [
-        warranty.certificateNumber,
-        warranty.clientName,
-        warranty.operationName,
-        warranty.relatedItemDescription,
-        warranty.description,
-        formatDate(warranty.startDate),
-        formatDate(warranty.endDate),
-        `${warranty.warrantyPeriodMonths} شهر`,
-        warranty.isActive ? '<span class="status-active">نشط</span>' : '<span class="status-inactive">منتهي</span>'
-      ])
-    });
-  }
-
-  const blob = createWordDocument('تقرير شهادات الضمان', content);
-  const fileName = `تقرير-شهادات-الضمان-${new Date().toISOString().split('T')[0]}.doc`;
-  saveWordDocument(blob, fileName);
-};
-
-// تصدير شهادات الضمان إلى Excel
-export const exportWarrantyCertificatesToExcel = (operations: Operation[], clients: Client[]) => {
-  // جمع جميع شهادات الضمان
-  const allWarranties = operations.flatMap(operation => 
-    (operation.warrantyCertificates || []).map(warranty => {
-      const client = clients.find(c => c.id === operation.clientId);
-      const relatedItem = warranty.relatedTo === 'item' && warranty.relatedItemId 
-        ? operation.items.find(item => item.id === warranty.relatedItemId)
-        : null;
-      
-      return {
-        'رقم الشهادة': warranty.certificateNumber,
-        'العميل': client?.name || 'غير معروف',
-        'العملية': operation.name,
-        'كود العملية': operation.code,
-        'البند المرتبط': relatedItem?.description || 'العملية كاملة',
-        'الوصف': warranty.description,
-        'تاريخ الإصدار': formatDate(warranty.issueDate),
-        'تاريخ البداية': formatDate(warranty.startDate),
-        'تاريخ النهاية': formatDate(warranty.endDate),
-        'مدة الضمان (بالأشهر)': warranty.warrantyPeriodMonths,
-        'الحالة': warranty.isActive ? 'نشط' : 'منتهي',
-        'ملاحظات': warranty.notes || ''
-      };
-    })
-  );
-
-  const worksheet = XLSX.utils.json_to_sheet(allWarranties);
-  worksheet['!cols'] = [
-    { wch: 20 }, // رقم الشهادة
-    { wch: 25 }, // العميل
-    { wch: 30 }, // العملية
-    { wch: 15 }, // كود العملية
-    { wch: 30 }, // البند المرتبط
-    { wch: 40 }, // الوصف
-    { wch: 12 }, // تاريخ الإصدار
-    { wch: 12 }, // تاريخ البداية
-    { wch: 12 }, // تاريخ النهاية
-    { wch: 15 }, // مدة الضمان
-    { wch: 10 }, // الحالة
-    { wch: 30 }  // ملاحظات
-  ];
-
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'شهادات الضمان');
-
-  // إضافة ورقة الإحصائيات
-  const stats = [
-    { 'البند': 'إجمالي الشهادات', 'القيمة': allWarranties.length },
-    { 'البند': 'الشهادات النشطة', 'القيمة': allWarranties.filter(w => w.الحالة === 'نشط').length },
-    { 'البند': 'الشهادات المنتهية', 'القيمة': allWarranties.filter(w => w.الحالة === 'منتهي').length }
-  ];
-
-  const statsWorksheet = XLSX.utils.json_to_sheet(stats);
-  statsWorksheet['!cols'] = [{ wch: 20 }, { wch: 20 }];
-  XLSX.utils.book_append_sheet(workbook, statsWorksheet, 'الإحصائيات');
-
-  const fileName = `شهادات-الضمان-${new Date().toISOString().split('T')[0]}.xlsx`;
-  XLSX.writeFile(workbook, fileName);
-};
-
-// باقي الدوال مع نفس التحسينات...
-export const exportOperationsToExcel = (operations: Operation[], clients: Client[], title: string = 'تقرير العمليات') => {
-  // إعداد البيانات
   const data = operations.map(operation => {
-    const client = clients.find(c => c.id === operation.clientId);
-    const statusLabels = {
-      'in_progress': 'قيد التنفيذ',
-      'completed': 'مكتملة',
-      'completed_partial_payment': 'مكتملة - دفع جزئي'
-    };
-
-    const totalDeductions = calculateTotalDeductions(operation);
+    const deductions = calculateTotalDeductions(operation);
     const netAmount = calculateNetAmount(operation);
-
+    
     return {
       'كود العملية': operation.code,
       'اسم العملية': operation.name,
-      'العميل': client?.name || 'غير معروف',
-      'نوع العميل': client?.type === 'owner' ? 'مالك' : client?.type === 'main_contractor' ? 'مقاول رئيسي' : 'استشاري',
-      'إجمالي القيمة': operation.totalAmount,
-      'إجمالي الخصومات': totalDeductions,
+      'العميل': getClientName(operation.clientId),
+      'القيمة الإجمالية': operation.totalAmount,
+      'الخصومات': deductions,
       'الصافي المستحق': netAmount,
       'المبلغ المحصل': operation.totalReceived,
-      'المبلغ المتبقي': netAmount - operation.totalReceived,
-      'نسبة الإنجاز': `${operation.overallExecutionPercentage.toFixed(1)}%`,
-      'الحالة': statusLabels[operation.status],
-      'تاريخ الإنشاء': formatDate(operation.createdAt),
-      'تاريخ التحديث': formatDate(operation.updatedAt),
-      'عدد البنود': operation.items.length,
-      'شيكات الضمان': operation.guaranteeChecks.length,
-      'خطابات الضمان': operation.guaranteeLetters.length,
-      'شهادات الضمان': (operation.warrantyCertificates || []).length,
-      'عدد المدفوعات': operation.receivedPayments.length
+      'المتبقي': netAmount - operation.totalReceived,
+      'نسبة الإنجاز': operation.overallExecutionPercentage,
+      'الحالة': operation.status === 'completed' ? 'مكتملة' : operation.status === 'completed_partial_payment' ? 'مكتملة - دفع جزئي' : operation.status === 'completed_full_payment' ? 'مكتملة ومدفوعة بالكامل' : 'قيد التنفيذ',
+      'تاريخ الإنشاء': formatDate(operation.createdAt)
     };
   });
 
-  // إنشاء ورقة العمل
-  const worksheet = XLSX.utils.json_to_sheet(data);
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'العمليات');
+  XLSX.writeFile(wb, `${title}_${new Date().toISOString().split('T')[0]}.xlsx`);
+};
 
-  // تنسيق العرض
-  const columnWidths = [
-    { wch: 15 }, // كود العملية
-    { wch: 25 }, // اسم العملية
-    { wch: 20 }, // العميل
-    { wch: 15 }, // نوع العميل
-    { wch: 15 }, // إجمالي القيمة
-    { wch: 15 }, // إجمالي الخصومات
-    { wch: 15 }, // الصافي المستحق
-    { wch: 15 }, // المبلغ المحصل
-    { wch: 15 }, // المبلغ المتبقي
-    { wch: 12 }, // نسبة الإنجاز
-    { wch: 18 }, // الحالة
-    { wch: 12 }, // تاريخ الإنشاء
-    { wch: 12 }, // تاريخ التحديث
-    { wch: 10 }, // عدد البنود
-    { wch: 12 }, // شيكات الضمان
-    { wch: 12 }, // خطابات الضمان
-    { wch: 12 }, // شهادات الضمان
-    { wch: 12 }  // عدد المدفوعات
-  ];
-  worksheet['!cols'] = columnWidths;
+// دوال Word
+export const createWordDocument = (title: string, content: string) => {
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html dir="rtl" lang="ar">
+    <head>
+      <meta charset="UTF-8">
+      <title>${title}</title>
+      <style>
+        body {
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+          direction: rtl;
+          text-align: right;
+          margin: 40px;
+          line-height: 1.8;
+          color: #333;
+        }
+        .header {
+          text-align: center;
+          border-bottom: 3px solid #2c5aa0;
+          padding-bottom: 20px;
+          margin-bottom: 30px;
+        }
+        .title {
+          font-size: 28px;
+          font-weight: bold;
+          color: #2c5aa0;
+          margin-bottom: 10px;
+        }
+        .subtitle {
+          font-size: 16px;
+          color: #666;
+          margin-bottom: 5px;
+        }
+        .date {
+          font-size: 14px;
+          color: #888;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          margin: 25px 0;
+          font-size: 13px;
+          box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+        th, td {
+          border: 1px solid #ddd;
+          padding: 12px;
+          text-align: right;
+        }
+        th {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          font-weight: bold;
+          text-align: center;
+        }
+        tr:nth-child(even) {
+          background-color: #f8f9fa;
+        }
+        tr:hover {
+          background-color: #e3f2fd;
+        }
+        .summary {
+          background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+          padding: 20px;
+          border-radius: 10px;
+          margin: 25px 0;
+          border-right: 5px solid #2c5aa0;
+        }
+        .summary h3 {
+          margin-top: 0;
+          color: #2c5aa0;
+          font-size: 20px;
+        }
+        .summary p {
+          margin: 8px 0;
+          font-size: 14px;
+        }
+        .highlight {
+          background-color: #fff3cd;
+          padding: 2px 6px;
+          border-radius: 3px;
+          font-weight: bold;
+        }
+        .section-title {
+          color: #2c5aa0;
+          font-size: 22px;
+          margin: 30px 0 15px 0;
+          padding-bottom: 10px;
+          border-bottom: 2px solid #e9ecef;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div class="title">${title}</div>
+        <div class="subtitle">نظام إدارة العمليات الإنشائية</div>
+        <div class="date">تاريخ التقرير: ${new Date().toLocaleDateString('ar-EG')}</div>
+      </div>
+      ${content}
+      <div style="margin-top: 50px; text-align: center; color: #888; font-size: 12px;">
+        تم إنشاء هذا التقرير بواسطة نظام إدارة العمليات الإنشائية
+      </div>
+    </body>
+    </html>
+  `;
 
-  // إنشاء المصنف
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'العمليات');
+  const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${title.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.html`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
 
-  // إضافة ورقة الإحصائيات
+export const exportOperationsToWord = (operations: Operation[], clients: Client[], title = 'تقرير العمليات') => {
+  const getClientName = (clientId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    return client ? client.name : 'عميل غير معروف';
+  };
+
+  let tableContent = `
+    <h2 class="section-title">تفاصيل العمليات</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>كود العملية</th>
+          <th>اسم العملية</th>
+          <th>العميل</th>
+          <th>القيمة الإجمالية</th>
+          <th>الخصومات</th>
+          <th>الصافي المستحق</th>
+          <th>المبلغ المحصل</th>
+          <th>المتبقي</th>
+          <th>نسبة الإنجاز</th>
+          <th>الحالة</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  let totalAmount = 0;
+  let totalReceived = 0;
+  let totalDeductions = 0;
+
+  operations.forEach(operation => {
+    const deductions = calculateTotalDeductions(operation);
+    const netAmount = calculateNetAmount(operation);
+    const remainingAmount = netAmount - operation.totalReceived;
+    
+    totalAmount += operation.totalAmount;
+    totalReceived += operation.totalReceived;
+    totalDeductions += deductions;
+
+    const statusLabel = operation.status === 'completed' ? 'مكتملة' : 
+                       operation.status === 'completed_partial_payment' ? 'مكتملة - دفع جزئي' : 
+                       operation.status === 'completed_full_payment' ? 'مكتملة ومدفوعة بالكامل' : 'قيد التنفيذ';
+
+    tableContent += `
+      <tr>
+        <td>${operation.code}</td>
+        <td>${operation.name}</td>
+        <td>${getClientName(operation.clientId)}</td>
+        <td>${formatCurrency(operation.totalAmount)}</td>
+        <td>${formatCurrency(deductions)}</td>
+        <td>${formatCurrency(netAmount)}</td>
+        <td>${formatCurrency(operation.totalReceived)}</td>
+        <td>${formatCurrency(remainingAmount)}</td>
+        <td>${operation.overallExecutionPercentage.toFixed(1)}%</td>
+        <td>${statusLabel}</td>
+      </tr>
+    `;
+  });
+
+  tableContent += `
+      </tbody>
+    </table>
+  `;
+
+  const summaryContent = `
+    <div class="summary">
+      <h3>ملخص التقرير</h3>
+      <p><strong>عدد العمليات:</strong> <span class="highlight">${operations.length}</span></p>
+      <p><strong>إجمالي القيمة:</strong> <span class="highlight">${formatCurrency(totalAmount)}</span></p>
+      <p><strong>إجمالي الخصومات:</strong> <span class="highlight">${formatCurrency(totalDeductions)}</span></p>
+      <p><strong>إجمالي المحصل:</strong> <span class="highlight">${formatCurrency(totalReceived)}</span></p>
+      <p><strong>إجمالي المتبقي:</strong> <span class="highlight">${formatCurrency(totalAmount - totalReceived)}</span></p>
+      <p><strong>معدل التحصيل:</strong> <span class="highlight">${totalAmount > 0 ? ((totalReceived / totalAmount) * 100).toFixed(1) : 0}%</span></p>
+    </div>
+  `;
+
+  const content = summaryContent + tableContent;
+  createWordDocument(title, content);
+};
+
+export const exportOperationDetailsToWord = (operation: Operation, client: Client) => {
+  const totalDeductions = calculateTotalDeductions(operation);
+  const netAmount = calculateNetAmount(operation);
+  const executedAmount = calculateExecutedTotal(operation.items);
+
+  const statusLabel = operation.status === 'completed' ? 'مكتملة' : 
+                     operation.status === 'completed_partial_payment' ? 'مكتملة - دفع جزئي' : 
+                     operation.status === 'completed_full_payment' ? 'مكتملة ومدفوعة بالكامل' : 'قيد التنفيذ';
+
+  const content = `
+    <div class="summary">
+      <h3>معلومات العملية</h3>
+      <p><strong>كود العملية:</strong> <span class="highlight">${operation.code}</span></p>
+      <p><strong>اسم العملية:</strong> <span class="highlight">${operation.name}</span></p>
+      <p><strong>العميل:</strong> <span class="highlight">${client.name}</span></p>
+      <p><strong>تاريخ الإنشاء:</strong> <span class="highlight">${formatDate(operation.createdAt)}</span></p>
+      <p><strong>الحالة:</strong> <span class="highlight">${statusLabel}</span></p>
+    </div>
+
+    <div class="summary">
+      <h3>الملخص المالي</h3>
+      <p><strong>القيمة الإجمالية:</strong> <span class="highlight">${formatCurrency(operation.totalAmount)}</span></p>
+      <p><strong>المبلغ المنفذ:</strong> <span class="highlight">${formatCurrency(executedAmount)}</span></p>
+      <p><strong>إجمالي الخصومات:</strong> <span class="highlight">${formatCurrency(totalDeductions)}</span></p>
+      <p><strong>الصافي المستحق:</strong> <span class="highlight">${formatCurrency(netAmount)}</span></p>
+      <p><strong>المبلغ المحصل:</strong> <span class="highlight">${formatCurrency(operation.totalReceived)}</span></p>
+      <p><strong>المبلغ المتبقي:</strong> <span class="highlight">${formatCurrency(netAmount - operation.totalReceived)}</span></p>
+      <p><strong>نسبة التنفيذ:</strong> <span class="highlight">${operation.overallExecutionPercentage.toFixed(1)}%</span></p>
+    </div>
+
+    <h2 class="section-title">بنود العملية</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>الكود</th>
+          <th>الوصف</th>
+          <th>القيمة</th>
+          <th>نسبة التنفيذ</th>
+          <th>القيمة المنفذة</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${operation.items.map(item => `
+          <tr>
+            <td>${item.code}</td>
+            <td>${item.description}</td>
+            <td>${formatCurrency(item.amount)}</td>
+            <td>${item.executionPercentage}%</td>
+            <td>${formatCurrency(item.amount * (item.executionPercentage / 100))}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+
+    ${operation.deductions.length > 0 ? `
+      <h2 class="section-title">الخصومات</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>اسم الخصم</th>
+            <th>النوع</th>
+            <th>القيمة</th>
+            <th>المبلغ المخصوم</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${operation.deductions.filter(d => d.isActive).map(deduction => {
+            const deductionAmount = deduction.type === 'percentage' 
+              ? (executedAmount * deduction.value / 100)
+              : deduction.value;
+            return `
+              <tr>
+                <td>${deduction.name}</td>
+                <td>${deduction.type === 'percentage' ? 'نسبة مئوية' : 'مبلغ ثابت'}</td>
+                <td>${deduction.type === 'percentage' ? deduction.value + '%' : formatCurrency(deduction.value)}</td>
+                <td>${formatCurrency(deductionAmount)}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    ` : ''}
+
+    ${operation.receivedPayments.length > 0 ? `
+      <h2 class="section-title">المدفوعات المستلمة</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>النوع</th>
+            <th>المبلغ</th>
+            <th>التاريخ</th>
+            <th>التفاصيل</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${operation.receivedPayments.map(payment => `
+            <tr>
+              <td>${payment.type === 'cash' ? 'نقدي' : 'شيك'}</td>
+              <td>${formatCurrency(payment.amount)}</td>
+              <td>${formatDate(payment.date)}</td>
+              <td>${payment.type === 'check' && payment.checkNumber ? `شيك رقم: ${payment.checkNumber}` : payment.notes || '-'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    ` : ''}
+  `;
+
+  createWordDocument(`تفاصيل العملية - ${operation.name}`, content);
+};
+
+// إضافة باقي دوال التصدير...
+export const exportChecksAndPaymentsToPDF = (operations: Operation[], clients: Client[]) => {
+  const getClientName = (clientId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    return client ? client.name : 'عميل غير معروف';
+  };
+
+  const allPayments = operations.flatMap(operation => 
+    operation.receivedPayments.map(payment => ({
+      ...payment,
+      operationName: operation.name,
+      operationCode: operation.code,
+      clientName: getClientName(operation.clientId)
+    }))
+  );
+
+  const content = `
+    <div class="summary">
+      <h3>ملخص المدفوعات</h3>
+      <p><strong>إجمالي المدفوعات:</strong> ${allPayments.length}</p>
+      <p><strong>الشيكات:</strong> ${allPayments.filter(p => p.type === 'check').length}</p>
+      <p><strong>المدفوعات النقدية:</strong> ${allPayments.filter(p => p.type === 'cash').length}</p>
+      <p><strong>إجمالي المبلغ:</strong> ${formatCurrency(allPayments.reduce((sum, p) => sum + p.amount, 0))}</p>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>النوع</th>
+          <th>المبلغ</th>
+          <th>التاريخ</th>
+          <th>العميل</th>
+          <th>العملية</th>
+          <th>التفاصيل</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${allPayments.map(payment => `
+          <tr>
+            <td>${payment.type === 'check' ? 'شيك' : 'نقدي'}</td>
+            <td>${formatCurrency(payment.amount)}</td>
+            <td>${formatDate(payment.date)}</td>
+            <td>${payment.clientName}</td>
+            <td>${payment.operationName}</td>
+            <td>${payment.type === 'check' && payment.checkNumber ? `شيك رقم: ${payment.checkNumber}` : payment.notes || '-'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+
+  exportAsHTMLToPDF('تقرير الشيكات والمدفوعات', content);
+};
+
+export const exportChecksAndPaymentsToExcel = (operations: Operation[], clients: Client[]) => {
+  const getClientName = (clientId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    return client ? client.name : 'عميل غير معروف';
+  };
+
+  const allPayments = operations.flatMap(operation => 
+    operation.receivedPayments.map(payment => ({
+      'النوع': payment.type === 'check' ? 'شيك' : 'نقدي',
+      'المبلغ': payment.amount,
+      'التاريخ': formatDate(payment.date),
+      'العميل': getClientName(operation.clientId),
+      'العملية': operation.name,
+      'كود العملية': operation.code,
+      'رقم الشيك': payment.checkNumber || '',
+      'البنك': payment.bank || '',
+      'تاريخ الاستلام': payment.receiptDate ? formatDate(payment.receiptDate) : '',
+      'ملاحظات': payment.notes || ''
+    }))
+  );
+
+  const ws = XLSX.utils.json_to_sheet(allPayments);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'المدفوعات');
+  XLSX.writeFile(wb, `تقرير_الشيكات_والمدفوعات_${new Date().toISOString().split('T')[0]}.xlsx`);
+};
+
+export const exportChecksAndPaymentsToWord = (operations: Operation[], clients: Client[]) => {
+  const getClientName = (clientId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    return client ? client.name : 'عميل غير معروف';
+  };
+
+  const allPayments = operations.flatMap(operation => 
+    operation.receivedPayments.map(payment => ({
+      ...payment,
+      operationName: operation.name,
+      operationCode: operation.code,
+      clientName: getClientName(operation.clientId)
+    }))
+  );
+
+  const content = `
+    <div class="summary">
+      <h3>ملخص المدفوعات</h3>
+      <p><strong>إجمالي المدفوعات:</strong> <span class="highlight">${allPayments.length}</span></p>
+      <p><strong>الشيكات:</strong> <span class="highlight">${allPayments.filter(p => p.type === 'check').length}</span></p>
+      <p><strong>المدفوعات النقدية:</strong> <span class="highlight">${allPayments.filter(p => p.type === 'cash').length}</span></p>
+      <p><strong>إجمالي المبلغ:</strong> <span class="highlight">${formatCurrency(allPayments.reduce((sum, p) => sum + p.amount, 0))}</span></p>
+    </div>
+
+    <h2 class="section-title">تفاصيل المدفوعات</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>النوع</th>
+          <th>المبلغ</th>
+          <th>التاريخ</th>
+          <th>العميل</th>
+          <th>العملية</th>
+          <th>التفاصيل</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${allPayments.map(payment => `
+          <tr>
+            <td>${payment.type === 'check' ? 'شيك' : 'نقدي'}</td>
+            <td>${formatCurrency(payment.amount)}</td>
+            <td>${formatDate(payment.date)}</td>
+            <td>${payment.clientName}</td>
+            <td>${payment.operationName}</td>
+            <td>${payment.type === 'check' && payment.checkNumber ? `شيك رقم: ${payment.checkNumber} - ${payment.bank || ''}` : payment.notes || '-'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+
+  createWordDocument('تقرير الشيكات والمدفوعات', content);
+};
+
+// إضافة باقي دوال التصدير للضمانات وشهادات الضمان...
+export const exportDetailedGuaranteesReportToPDF = (operations: Operation[], clients: Client[]) => {
+  const getClientName = (clientId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    return client ? client.name : 'عميل غير معروف';
+  };
+
+  const allGuaranteeChecks = operations.flatMap(operation => 
+    operation.guaranteeChecks.map(check => ({
+      ...check,
+      operationName: operation.name,
+      clientName: getClientName(operation.clientId),
+      type: 'شيك ضمان'
+    }))
+  );
+
+  const allGuaranteeLetters = operations.flatMap(operation => 
+    operation.guaranteeLetters.map(letter => ({
+      ...letter,
+      operationName: operation.name,
+      clientName: getClientName(operation.clientId),
+      type: 'خطاب ضمان'
+    }))
+  );
+
+  const allGuarantees = [...allGuaranteeChecks, ...allGuaranteeLetters];
+
+  const content = `
+    <div class="summary">
+      <h3>ملخص الضمانات</h3>
+      <p><strong>إجمالي الضمانات:</strong> ${allGuarantees.length}</p>
+      <p><strong>شيكات الضمان:</strong> ${allGuaranteeChecks.length}</p>
+      <p><strong>خطابات الضمان:</strong> ${allGuaranteeLetters.length}</p>
+      <p><strong>الضمانات النشطة:</strong> ${allGuarantees.filter(g => !g.isReturned).length}</p>
+      <p><strong>الضمانات المستردة:</strong> ${allGuarantees.filter(g => g.isReturned).length}</p>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>النوع</th>
+          <th>الرقم</th>
+          <th>المبلغ</th>
+          <th>البنك</th>
+          <th>العميل</th>
+          <th>العملية</th>
+          <th>تاريخ الانتهاء</th>
+          <th>الحالة</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${allGuarantees.map(guarantee => `
+          <tr>
+            <td>${guarantee.type}</td>
+            <td>${guarantee.checkNumber || guarantee.letterNumber || ''}</td>
+            <td>${formatCurrency(guarantee.amount)}</td>
+            <td>${guarantee.bank}</td>
+            <td>${guarantee.clientName}</td>
+            <td>${guarantee.operationName}</td>
+            <td>${formatDate(guarantee.expiryDate || guarantee.dueDate)}</td>
+            <td>${guarantee.isReturned ? 'مُسترد' : 'قائم'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+
+  exportAsHTMLToPDF('تقرير الضمانات المفصل', content);
+};
+
+export const exportGuaranteesToExcel = (operations: Operation[], clients: Client[]) => {
+  const getClientName = (clientId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    return client ? client.name : 'عميل غير معروف';
+  };
+
+  const allGuaranteeChecks = operations.flatMap(operation => 
+    operation.guaranteeChecks.map(check => ({
+      'النوع': 'شيك ضمان',
+      'الرقم': check.checkNumber,
+      'المبلغ': check.amount,
+      'البنك': check.bank,
+      'العميل': getClientName(operation.clientId),
+      'العملية': operation.name,
+      'تاريخ الشيك': formatDate(check.checkDate),
+      'تاريخ التسليم': formatDate(check.deliveryDate),
+      'تاريخ الانتهاء': formatDate(check.expiryDate),
+      'الحالة': check.isReturned ? 'مُسترد' : 'قائم',
+      'تاريخ الاسترداد': check.returnDate ? formatDate(check.returnDate) : ''
+    }))
+  );
+
+  const allGuaranteeLetters = operations.flatMap(operation => 
+    operation.guaranteeLetters.map(letter => ({
+      'النوع': 'خطاب ضمان',
+      'الرقم': letter.letterNumber,
+      'المبلغ': letter.amount,
+      'البنك': letter.bank,
+      'العميل': getClientName(operation.clientId),
+      'العملية': operation.name,
+      'تاريخ الخطاب': formatDate(letter.letterDate),
+      'تاريخ التسليم': '',
+      'تاريخ الانتهاء': formatDate(letter.dueDate),
+      'الحالة': letter.isReturned ? 'مُسترد' : 'قائم',
+      'تاريخ الاسترداد': letter.returnDate ? formatDate(letter.returnDate) : ''
+    }))
+  );
+
+  const allGuarantees = [...allGuaranteeChecks, ...allGuaranteeLetters];
+
+  const ws = XLSX.utils.json_to_sheet(allGuarantees);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'الضمانات');
+  XLSX.writeFile(wb, `تقرير_الضمانات_${new Date().toISOString().split('T')[0]}.xlsx`);
+};
+
+export const exportDetailedGuaranteesReportToWord = (operations: Operation[], clients: Client[]) => {
+  const getClientName = (clientId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    return client ? client.name : 'عميل غير معروف';
+  };
+
+  const allGuaranteeChecks = operations.flatMap(operation => 
+    operation.guaranteeChecks.map(check => ({
+      ...check,
+      operationName: operation.name,
+      clientName: getClientName(operation.clientId),
+      type: 'شيك ضمان'
+    }))
+  );
+
+  const allGuaranteeLetters = operations.flatMap(operation => 
+    operation.guaranteeLetters.map(letter => ({
+      ...letter,
+      operationName: operation.name,
+      clientName: getClientName(operation.clientId),
+      type: 'خطاب ضمان'
+    }))
+  );
+
+  const allGuarantees = [...allGuaranteeChecks, ...allGuaranteeLetters];
+
+  const content = `
+    <div class="summary">
+      <h3>ملخص الضمانات</h3>
+      <p><strong>إجمالي الضمانات:</strong> <span class="highlight">${allGuarantees.length}</span></p>
+      <p><strong>شيكات الضمان:</strong> <span class="highlight">${allGuaranteeChecks.length}</span></p>
+      <p><strong>خطابات الضمان:</strong> <span class="highlight">${allGuaranteeLetters.length}</span></p>
+      <p><strong>الضمانات النشطة:</strong> <span class="highlight">${allGuarantees.filter(g => !g.isReturned).length}</span></p>
+      <p><strong>الضمانات المستردة:</strong> <span class="highlight">${allGuarantees.filter(g => g.isReturned).length}</span></p>
+    </div>
+
+    <h2 class="section-title">تفاصيل الضمانات</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>النوع</th>
+          <th>الرقم</th>
+          <th>المبلغ</th>
+          <th>البنك</th>
+          <th>العميل</th>
+          <th>العملية</th>
+          <th>تاريخ الانتهاء</th>
+          <th>الحالة</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${allGuarantees.map(guarantee => `
+          <tr>
+            <td>${guarantee.type}</td>
+            <td>${guarantee.checkNumber || guarantee.letterNumber || ''}</td>
+            <td>${formatCurrency(guarantee.amount)}</td>
+            <td>${guarantee.bank}</td>
+            <td>${guarantee.clientName}</td>
+            <td>${guarantee.operationName}</td>
+            <td>${formatDate(guarantee.expiryDate || guarantee.dueDate)}</td>
+            <td>${guarantee.isReturned ? 'مُسترد' : 'قائم'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+
+  createWordDocument('تقرير الضمانات المفصل', content);
+};
+
+export const exportWarrantyCertificatesReportToPDF = (operations: Operation[], clients: Client[]) => {
+  const getClientName = (clientId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    return client ? client.name : 'عميل غير معروف';
+  };
+
+  const allWarranties = operations.flatMap(operation => 
+    (operation.warrantyCertificates || []).map(warranty => ({
+      ...warranty,
+      operationName: operation.name,
+      clientName: getClientName(operation.clientId)
+    }))
+  );
+
+  const content = `
+    <div class="summary">
+      <h3>ملخص شهادات الضمان</h3>
+      <p><strong>إجمالي الشهادات:</strong> ${allWarranties.length}</p>
+      <p><strong>الشهادات النشطة:</strong> ${allWarranties.filter(w => w.isActive).length}</p>
+      <p><strong>الشهادات المنتهية:</strong> ${allWarranties.filter(w => !w.isActive).length}</p>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>رقم الشهادة</th>
+          <th>العميل</th>
+          <th>العملية</th>
+          <th>الوصف</th>
+          <th>تاريخ البداية</th>
+          <th>تاريخ النهاية</th>
+          <th>مدة الضمان</th>
+          <th>الحالة</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${allWarranties.map(warranty => `
+          <tr>
+            <td>${warranty.certificateNumber}</td>
+            <td>${warranty.clientName}</td>
+            <td>${warranty.operationName}</td>
+            <td>${warranty.description}</td>
+            <td>${formatDate(warranty.startDate)}</td>
+            <td>${formatDate(warranty.endDate)}</td>
+            <td>${warranty.warrantyPeriodMonths} شهر</td>
+            <td>${warranty.isActive ? 'نشط' : 'منتهي'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+
+  exportAsHTMLToPDF('تقرير شهادات الضمان', content);
+};
+
+export const exportWarrantyCertificatesToExcel = (operations: Operation[], clients: Client[]) => {
+  const getClientName = (clientId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    return client ? client.name : 'عميل غير معروف';
+  };
+
+  const allWarranties = operations.flatMap(operation => 
+    (operation.warrantyCertificates || []).map(warranty => ({
+      'رقم الشهادة': warranty.certificateNumber,
+      'العميل': getClientName(operation.clientId),
+      'العملية': operation.name,
+      'الوصف': warranty.description,
+      'تاريخ الإصدار': formatDate(warranty.issueDate),
+      'تاريخ البداية': formatDate(warranty.startDate),
+      'تاريخ النهاية': formatDate(warranty.endDate),
+      'مدة الضمان (أشهر)': warranty.warrantyPeriodMonths,
+      'مرتبط بـ': warranty.relatedTo === 'operation' ? 'العملية كاملة' : 'بند محدد',
+      'الحالة': warranty.isActive ? 'نشط' : 'منتهي',
+      'ملاحظات': warranty.notes || ''
+    }))
+  );
+
+  const ws = XLSX.utils.json_to_sheet(allWarranties);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'شهادات الضمان');
+  XLSX.writeFile(wb, `تقرير_شهادات_الضمان_${new Date().toISOString().split('T')[0]}.xlsx`);
+};
+
+export const exportWarrantyCertificatesReportToWord = (operations: Operation[], clients: Client[]) => {
+  const getClientName = (clientId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    return client ? client.name : 'عميل غير معروف';
+  };
+
+  const allWarranties = operations.flatMap(operation => 
+    (operation.warrantyCertificates || []).map(warranty => ({
+      ...warranty,
+      operationName: operation.name,
+      clientName: getClientName(operation.clientId)
+    }))
+  );
+
+  const content = `
+    <div class="summary">
+      <h3>ملخص شهادات الضمان</h3>
+      <p><strong>إجمالي الشهادات:</strong> <span class="highlight">${allWarranties.length}</span></p>
+      <p><strong>الشهادات النشطة:</strong> <span class="highlight">${allWarranties.filter(w => w.isActive).length}</span></p>
+      <p><strong>الشهادات المنتهية:</strong> <span class="highlight">${allWarranties.filter(w => !w.isActive).length}</span></p>
+    </div>
+
+    <h2 class="section-title">تفاصيل شهادات الضمان</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>رقم الشهادة</th>
+          <th>العميل</th>
+          <th>العملية</th>
+          <th>الوصف</th>
+          <th>تاريخ البداية</th>
+          <th>تاريخ النهاية</th>
+          <th>مدة الضمان</th>
+          <th>الحالة</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${allWarranties.map(warranty => `
+          <tr>
+            <td>${warranty.certificateNumber}</td>
+            <td>${warranty.clientName}</td>
+            <td>${warranty.operationName}</td>
+            <td>${warranty.description}</td>
+            <td>${formatDate(warranty.startDate)}</td>
+            <td>${formatDate(warranty.endDate)}</td>
+            <td>${warranty.warrantyPeriodMonths} شهر</td>
+            <td>${warranty.isActive ? 'نشط' : 'منتهي'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+
+  createWordDocument('تقرير شهادات الضمان', content);
+};
+
+export const exportClientsToPDF = (clients: Client[], title = 'تقرير العملاء') => {
+  const content = `
+    <div class="summary">
+      <h3>ملخص العملاء</h3>
+      <p><strong>إجمالي العملاء:</strong> ${clients.length}</p>
+      <p><strong>الملاك:</strong> ${clients.filter(c => c.type === 'owner').length}</p>
+      <p><strong>المقاولون الرئيسيون:</strong> ${clients.filter(c => c.type === 'main_contractor').length}</p>
+      <p><strong>الاستشاريون:</strong> ${clients.filter(c => c.type === 'consultant').length}</p>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>اسم العميل</th>
+          <th>النوع</th>
+          <th>الهاتف</th>
+          <th>البريد الإلكتروني</th>
+          <th>العنوان</th>
+          <th>جهات الاتصال</th>
+          <th>تاريخ الإنشاء</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${clients.map(client => `
+          <tr>
+            <td>${client.name}</td>
+            <td>${client.type === 'owner' ? 'مالك' : client.type === 'main_contractor' ? 'مقاول رئيسي' : 'استشاري'}</td>
+            <td>${client.phone || '-'}</td>
+            <td>${client.email || '-'}</td>
+            <td>${client.address || '-'}</td>
+            <td>${client.contacts?.length || 0}</td>
+            <td>${formatDate(client.createdAt)}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+
+  exportAsHTMLToPDF(title, content);
+};
+
+export const exportClientsToExcel = (clients: Client[], title = 'تقرير العملاء') => {
+  const data = clients.map(client => ({
+    'اسم العميل': client.name,
+    'النوع': client.type === 'owner' ? 'مالك' : client.type === 'main_contractor' ? 'مقاول رئيسي' : 'استشاري',
+    'الهاتف': client.phone || '',
+    'البريد الإلكتروني': client.email || '',
+    'العنوان': client.address || '',
+    'عدد جهات الاتصال': client.contacts?.length || 0,
+    'تاريخ الإنشاء': formatDate(client.createdAt),
+    'تاريخ التحديث': formatDate(client.updatedAt)
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'العملاء');
+  XLSX.writeFile(wb, `${title}_${new Date().toISOString().split('T')[0]}.xlsx`);
+};
+
+export const exportClientsToWord = (clients: Client[], title = 'تقرير العملاء') => {
+  const content = `
+    <div class="summary">
+      <h3>ملخص العملاء</h3>
+      <p><strong>إجمالي العملاء:</strong> <span class="highlight">${clients.length}</span></p>
+      <p><strong>الملاك:</strong> <span class="highlight">${clients.filter(c => c.type === 'owner').length}</span></p>
+      <p><strong>المقاولون الرئيسيون:</strong> <span class="highlight">${clients.filter(c => c.type === 'main_contractor').length}</span></p>
+      <p><strong>الاستشاريون:</strong> <span class="highlight">${clients.filter(c => c.type === 'consultant').length}</span></p>
+    </div>
+
+    <h2 class="section-title">تفاصيل العملاء</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>اسم العميل</th>
+          <th>النوع</th>
+          <th>الهاتف</th>
+          <th>البريد الإلكتروني</th>
+          <th>العنوان</th>
+          <th>جهات الاتصال</th>
+          <th>تاريخ الإنشاء</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${clients.map(client => `
+          <tr>
+            <td>${client.name}</td>
+            <td>${client.type === 'owner' ? 'مالك' : client.type === 'main_contractor' ? 'مقاول رئيسي' : 'استشاري'}</td>
+            <td>${client.phone || '-'}</td>
+            <td>${client.email || '-'}</td>
+            <td>${client.address || '-'}</td>
+            <td>${client.contacts?.length || 0}</td>
+            <td>${formatDate(client.createdAt)}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+
+  createWordDocument(title, content);
+};
+
+export const exportFinancialReportToPDF = (operations: Operation[], clients: Client[]) => {
+  const getClientName = (clientId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    return client ? client.name : 'عميل غير معروف';
+  };
+
   const totalAmount = operations.reduce((sum, op) => sum + op.totalAmount, 0);
-  const totalDeductions = operations.reduce((sum, op) => sum + calculateTotalDeductions(op), 0);
-  const totalNetAmount = operations.reduce((sum, op) => sum + calculateNetAmount(op), 0);
   const totalReceived = operations.reduce((sum, op) => sum + op.totalReceived, 0);
+  const totalDeductions = operations.reduce((sum, op) => sum + calculateTotalDeductions(op), 0);
+  const totalNet = operations.reduce((sum, op) => sum + calculateNetAmount(op), 0);
 
-  const stats = [
-    { 'البند': 'إجمالي العمليات', 'القيمة': operations.length },
-    { 'البند': 'العمليات المكتملة', 'القيمة': operations.filter(op => op.status === 'completed').length },
-    { 'البند': 'العمليات قيد التنفيذ', 'القيمة': operations.filter(op => op.status === 'in_progress').length },
-    { 'البند': 'إجمالي القيمة', 'القيمة': totalAmount },
-    { 'البند': 'إجمالي الخصومات', 'القيمة': totalDeductions },
-    { 'البند': 'إجمالي الصافي المستحق', 'القيمة': totalNetAmount },
-    { 'البند': 'إجمالي المحصل', 'القيمة': totalReceived },
-    { 'البند': 'إجمالي المتبقي', 'القيمة': totalNetAmount - totalReceived }
-  ];
-
-  const statsWorksheet = XLSX.utils.json_to_sheet(stats);
-  statsWorksheet['!cols'] = [{ wch: 20 }, { wch: 20 }];
-  XLSX.utils.book_append_sheet(workbook, statsWorksheet, 'الإحصائيات');
-
-  // حفظ الملف
-  const fileName = `تقرير-العمليات-${new Date().toISOString().split('T')[0]}.xlsx`;
-  XLSX.writeFile(workbook, fileName);
-};
-
-// تصدير العملاء إلى PDF
-export const exportClientsToPDF = (clients: Client[], title: string = 'تقرير العملاء') => {
-  const doc = new jsPDF({
-    orientation: 'landscape',
-    unit: 'mm',
-    format: 'a4'
-  });
-  
-  setupArabicPDFFont(doc);
-
-  // العنوان
-  doc.setFontSize(16);
-  doc.text(formatArabicText(title), doc.internal.pageSize.getWidth() / 2, 20, { align: 'center' });
-  
-  // تاريخ التقرير
-  doc.setFontSize(10);
-  const dateText = `تاريخ التقرير: ${formatDate(new Date())}`;
-  doc.text(dateText, 20, 35);
-
-  // إعداد البيانات للجدول
-  const tableData = clients.map(client => {
-    const clientTypeLabels = {
-      'owner': 'مالك',
-      'main_contractor': 'مقاول رئيسي',
-      'consultant': 'استشاري'
-    };
-    
-    const mainContact = client.contacts?.find(contact => contact.isMainContact);
-    
-    return [
-      formatArabicText(client.name),
-      clientTypeLabels[client.type] || 'غير معروف',
-      client.phone || '-',
-      client.email || '-',
-      formatArabicText(client.address || '-'),
-      formatArabicText(mainContact?.name || '-'),
-      mainContact?.phone || '-',
-      formatDate(client.createdAt)
-    ];
-  });
-
-  // إعداد الجدول
-  (doc as any).autoTable({
-    head: [['اسم العميل', 'النوع', 'الهاتف', 'البريد الإلكتروني', 'العنوان', 'جهة الاتصال الرئيسية', 'هاتف جهة الاتصال', 'تاريخ الإضافة']],
-    body: tableData,
-    startY: 45,
-    styles: {
-      fontSize: 8,
-      cellPadding: 3,
-      overflow: 'linebreak',
-      halign: 'right',
-      font: 'helvetica'
-    },
-    headStyles: {
-      fillColor: [66, 139, 202],
-      textColor: 255,
-      fontSize: 9,
-      fontStyle: 'bold',
-      halign: 'right'
-    },
-    alternateRowStyles: {
-      fillColor: [245, 245, 245]
-    },
-    margin: { top: 45, right: 10, bottom: 20, left: 10 },
-    columnStyles: {
-      0: { cellWidth: 35 },
-      1: { cellWidth: 25 },
-      2: { cellWidth: 25 },
-      3: { cellWidth: 35 },
-      4: { cellWidth: 35 },
-      5: { cellWidth: 30 },
-      6: { cellWidth: 25 },
-      7: { cellWidth: 25 }
-    }
-  });
-
-  // إضافة إحصائيات
-  const finalY = (doc as any).lastAutoTable.finalY + 20;
-  doc.setFontSize(12);
-  doc.text('ملخص الإحصائيات:', 20, finalY);
-  doc.setFontSize(10);
-  doc.text(`إجمالي العملاء: ${clients.length}`, 20, finalY + 10);
-  
-  const ownerCount = clients.filter(c => c.type === 'owner').length;
-  const contractorCount = clients.filter(c => c.type === 'main_contractor').length;
-  const consultantCount = clients.filter(c => c.type === 'consultant').length;
-  
-  doc.text(`الملاك: ${ownerCount}`, 20, finalY + 20);
-  doc.text(`المقاولون الرئيسيون: ${contractorCount}`, 20, finalY + 30);
-  doc.text(`الاستشاريون: ${consultantCount}`, 20, finalY + 40);
-
-  // حفظ الملف
-  const fileName = `تقرير-العملاء-${new Date().toISOString().split('T')[0]}.pdf`;
-  doc.save(fileName);
-};
-
-// تصدير العملاء إلى Word
-export const exportClientsToWord = (clients: Client[], title: string = 'تقرير العملاء') => {
-  const ownerCount = clients.filter(c => c.type === 'owner').length;
-  const contractorCount = clients.filter(c => c.type === 'main_contractor').length;
-  const consultantCount = clients.filter(c => c.type === 'consultant').length;
-
-  const content = [
-    {
-      type: 'summary',
-      title: 'ملخص الإحصائيات',
-      items: [
-        { label: 'إجمالي العملاء', value: clients.length.toString() },
-        { label: 'الملاك', value: ownerCount.toString() },
-        { label: 'المقاولون الرئيسيون', value: contractorCount.toString() },
-        { label: 'الاستشاريون', value: consultantCount.toString() }
-      ]
-    },
-    {
-      type: 'table',
-      title: 'تفاصيل العملاء',
-      headers: ['اسم العميل', 'النوع', 'الهاتف', 'البريد الإلكتروني', 'العنوان', 'جهة الاتصال الرئيسية', 'هاتف جهة الاتصال', 'تاريخ الإضافة'],
-      rows: clients.map(client => {
-        const clientTypeLabels = {
-          'owner': 'مالك',
-          'main_contractor': 'مقاول رئيسي',
-          'consultant': 'استشاري'
-        };
-        
-        const mainContact = client.contacts?.find(contact => contact.isMainContact);
-        
-        return [
-          client.name,
-          clientTypeLabels[client.type] || 'غير معروف',
-          client.phone || '-',
-          client.email || '-',
-          client.address || '-',
-          mainContact?.name || '-',
-          mainContact?.phone || '-',
-          formatDate(client.createdAt)
-        ];
-      })
-    }
-  ];
-
-  const blob = createWordDocument(title, content);
-  const fileName = `تقرير-العملاء-${new Date().toISOString().split('T')[0]}.doc`;
-  saveWordDocument(blob, fileName);
-};
-
-// تصدير العملاء إلى Excel
-export const exportClientsToExcel = (clients: Client[], title: string = 'تقرير العملاء') => {
-  const data = clients.map(client => {
-    const clientTypeLabels = {
-      'owner': 'مالك',
-      'main_contractor': 'مقاول رئيسي',
-      'consultant': 'استشاري'
-    };
-    
-    const mainContact = client.contacts?.find(contact => contact.isMainContact);
+  const clientStats = clients.map(client => {
+    const clientOperations = operations.filter(op => op.clientId === client.id);
+    const clientTotal = clientOperations.reduce((sum, op) => sum + op.totalAmount, 0);
+    const clientReceived = clientOperations.reduce((sum, op) => sum + op.totalReceived, 0);
     
     return {
-      'اسم العميل': client.name,
-      'نوع العميل': clientTypeLabels[client.type] || 'غير معروف',
-      'رقم الهاتف': client.phone || '',
-      'البريد الإلكتروني': client.email || '',
-      'العنوان': client.address || '',
-      'جهة الاتصال الرئيسية': mainContact?.name || '',
-      'منصب جهة الاتصال': mainContact?.position || '',
-      'قسم جهة الاتصال': mainContact?.department || '',
-      'هاتف جهة الاتصال': mainContact?.phone || '',
-      'بريد جهة الاتصال': mainContact?.email || '',
-      'عدد جهات الاتصال': client.contacts?.length || 0,
-      'تاريخ الإضافة': formatDate(client.createdAt),
-      'تاريخ التحديث': formatDate(client.updatedAt)
+      client,
+      operationsCount: clientOperations.length,
+      totalAmount: clientTotal,
+      totalReceived: clientReceived,
+      outstanding: clientTotal - clientReceived
     };
-  });
+  }).filter(stat => stat.operationsCount > 0);
 
-  const worksheet = XLSX.utils.json_to_sheet(data);
-  worksheet['!cols'] = [
-    { wch: 25 }, // اسم العميل
-    { wch: 15 }, // نوع العميل
-    { wch: 15 }, // رقم الهاتف
-    { wch: 30 }, // البريد الإلكتروني
-    { wch: 30 }, // العنوان
-    { wch: 25 }, // جهة الاتصال الرئيسية
-    { wch: 20 }, // منصب جهة الاتصال
-    { wch: 15 }, // قسم جهة الاتصال
-    { wch: 15 }, // هاتف جهة الاتصال
-    { wch: 25 }, // بريد جهة الاتصال
-    { wch: 12 }, // عدد جهات الاتصال
-    { wch: 15 }, // تاريخ الإضافة
-    { wch: 15 }  // تاريخ التحديث
-  ];
+  const content = `
+    <div class="summary">
+      <h3>الملخص المالي العام</h3>
+      <p><strong>إجمالي القيمة:</strong> ${formatCurrency(totalAmount)}</p>
+      <p><strong>إجمالي الخصومات:</strong> ${formatCurrency(totalDeductions)}</p>
+      <p><strong>الصافي المستحق:</strong> ${formatCurrency(totalNet)}</p>
+      <p><strong>إجمالي المحصل:</strong> ${formatCurrency(totalReceived)}</p>
+      <p><strong>إجمالي المتبقي:</strong> ${formatCurrency(totalNet - totalReceived)}</p>
+      <p><strong>معدل التحصيل:</strong> ${totalNet > 0 ? ((totalReceived / totalNet) * 100).toFixed(1) : 0}%</p>
+    </div>
 
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'العملاء');
+    <table>
+      <thead>
+        <tr>
+          <th>العميل</th>
+          <th>عدد العمليات</th>
+          <th>إجمالي القيمة</th>
+          <th>المبلغ المحصل</th>
+          <th>المبلغ المتبقي</th>
+          <th>معدل التحصيل</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${clientStats.map(stat => `
+          <tr>
+            <td>${stat.client.name}</td>
+            <td>${stat.operationsCount}</td>
+            <td>${formatCurrency(stat.totalAmount)}</td>
+            <td>${formatCurrency(stat.totalReceived)}</td>
+            <td>${formatCurrency(stat.outstanding)}</td>
+            <td>${stat.totalAmount > 0 ? ((stat.totalReceived / stat.totalAmount) * 100).toFixed(1) : 0}%</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
 
-  const fileName = `تقرير-العملاء-${new Date().toISOString().split('T')[0]}.xlsx`;
-  XLSX.writeFile(workbook, fileName);
+  exportAsHTMLToPDF('التقرير المالي', content);
 };
 
-// تصدير تقرير مالي شامل
-export const exportFinancialReportToPDF = (operations: Operation[], clients: Client[]) => {
-  const doc = new jsPDF({
-    orientation: 'portrait',
-    unit: 'mm',
-    format: 'a4'
-  });
-  
-  setupArabicPDFFont(doc);
-
-  // العنوان
-  doc.setFontSize(18);
-  const titleText = 'التقرير المالي الشامل';
-  doc.text(formatArabicText(titleText), doc.internal.pageSize.getWidth() / 2, 20, { align: 'center' });
-  
-  // تاريخ التقرير
-  doc.setFontSize(10);
-  const dateText = `تاريخ التقرير: ${formatDate(new Date())}`;
-  doc.text(dateText, 20, 35);
-
-  // حساب الإحصائيات
-  const totalOperations = operations.length;
-  const completedOperations = operations.filter(op => op.status === 'completed').length;
-  const inProgressOperations = operations.filter(op => op.status === 'in_progress').length;
-  const totalAmount = operations.reduce((sum, op) => sum + op.totalAmount, 0);
-  const totalDeductions = operations.reduce((sum, op) => sum + calculateTotalDeductions(op), 0);
-  const totalNetAmount = operations.reduce((sum, op) => sum + calculateNetAmount(op), 0);
-  const totalReceived = operations.reduce((sum, op) => sum + op.totalReceived, 0);
-  const totalOutstanding = totalNetAmount - totalReceived;
-  const collectionRate = totalNetAmount > 0 ? (totalReceived / totalNetAmount) * 100 : 0;
-
-  // الإحصائيات العامة
-  let yPosition = 50;
-  doc.setFontSize(14);
-  doc.text('الإحصائيات العامة:', 20, yPosition);
-  
-  doc.setFontSize(11);
-  yPosition += 15;
-  doc.text(`إجمالي العمليات: ${totalOperations}`, 30, yPosition);
-  yPosition += 10;
-  doc.text(`العمليات المكتملة: ${completedOperations}`, 30, yPosition);
-  yPosition += 10;
-  doc.text(`العمليات قيد التنفيذ: ${inProgressOperations}`, 30, yPosition);
-  yPosition += 10;
-  doc.text(`معدل الإنجاز: ${totalOperations > 0 ? ((completedOperations / totalOperations) * 100).toFixed(1) : 0}%`, 30, yPosition);
-
-  // الإحصائيات المالية
-  yPosition += 20;
-  doc.setFontSize(14);
-  doc.text('الإحصائيات المالية:', 20, yPosition);
-  
-  doc.setFontSize(11);
-  yPosition += 15;
-  doc.text(`إجمالي القيمة: ${formatCurrency(totalAmount)}`, 30, yPosition);
-  yPosition += 10;
-  doc.text(`إجمالي الخصومات: ${formatCurrency(totalDeductions)}`, 30, yPosition);
-  yPosition += 10;
-  doc.text(`الصافي المستحق: ${formatCurrency(totalNetAmount)}`, 30, yPosition);
-  yPosition += 10;
-  doc.text(`إجمالي المحصل: ${formatCurrency(totalReceived)}`, 30, yPosition);
-  yPosition += 10;
-  doc.text(`إجمالي المتبقي: ${formatCurrency(totalOutstanding)}`, 30, yPosition);
-  yPosition += 10;
-  doc.text(`معدل التحصيل: ${collectionRate.toFixed(1)}%`, 30, yPosition);
-
-  // جدول العمليات حسب العميل
-  yPosition += 30;
-  const clientStats = clients.map(client => {
-    const clientOperations = operations.filter(op => op.clientId === client.id);
-    const clientTotal = clientOperations.reduce((sum, op) => sum + op.totalAmount, 0);
-    const clientDeductions = clientOperations.reduce((sum, op) => sum + calculateTotalDeductions(op), 0);
-    const clientNetAmount = clientOperations.reduce((sum, op) => sum + calculateNetAmount(op), 0);
-    const clientReceived = clientOperations.reduce((sum, op) => sum + op.totalReceived, 0);
-    
-    return [
-      formatArabicText(client.name),
-      clientOperations.length.toString(),
-      formatCurrency(clientTotal),
-      formatCurrency(clientDeductions),
-      formatCurrency(clientNetAmount),
-      formatCurrency(clientReceived),
-      formatCurrency(clientNetAmount - clientReceived),
-      clientNetAmount > 0 ? `${((clientReceived / clientNetAmount) * 100).toFixed(1)}%` : '0%'
-    ];
-  }).filter(stat => parseInt(stat[1]) > 0);
-
-  if (clientStats.length > 0) {
-    (doc as any).autoTable({
-      head: [['العميل', 'العمليات', 'إجمالي القيمة', 'الخصومات', 'الصافي المستحق', 'المحصل', 'المتبقي', 'معدل التحصيل']],
-      body: clientStats,
-      startY: yPosition,
-      styles: {
-        fontSize: 8,
-        cellPadding: 3,
-        halign: 'right',
-        font: 'helvetica'
-      },
-      headStyles: {
-        fillColor: [66, 139, 202],
-        textColor: 255,
-        fontSize: 9,
-        fontStyle: 'bold',
-        halign: 'right'
-      },
-      alternateRowStyles: {
-        fillColor: [245, 245, 245]
-      }
-    });
-  }
-
-  const fileName = `التقرير-المالي-${new Date().toISOString().split('T')[0]}.pdf`;
-  doc.save(fileName);
-};
-
-// تصدير تقرير مالي إلى Word
-export const exportFinancialReportToWord = (operations: Operation[], clients: Client[]) => {
-  // ورقة الإحصائيات العامة
-  const totalAmount = operations.reduce((sum, op) => sum + op.totalAmount, 0);
-  const totalDeductions = operations.reduce((sum, op) => sum + calculateTotalDeductions(op), 0);
-  const totalNetAmount = operations.reduce((sum, op) => sum + calculateNetAmount(op), 0);
-  const totalReceived = operations.reduce((sum, op) => sum + op.totalReceived, 0);
-  const completedOperations = operations.filter(op => op.status === 'completed').length;
-
-  const content = [
-    {
-      type: 'summary',
-      title: 'الإحصائيات العامة',
-      items: [
-        { label: 'إجمالي العمليات', value: operations.length.toString() },
-        { label: 'العمليات المكتملة', value: completedOperations.toString() },
-        { label: 'العمليات قيد التنفيذ', value: operations.filter(op => op.status === 'in_progress').length.toString() },
-        { label: 'معدل الإنجاز', value: `${operations.length > 0 ? ((completedOperations / operations.length) * 100).toFixed(1) : 0}%` }
-      ]
-    },
-    {
-      type: 'summary',
-      title: 'الإحصائيات المالية',
-      items: [
-        { label: 'إجمالي القيمة', value: `<span class="currency">${formatCurrency(totalAmount)}</span>` },
-        { label: 'إجمالي الخصومات', value: `<span class="currency">${formatCurrency(totalDeductions)}</span>` },
-        { label: 'الصافي المستحق', value: `<span class="currency">${formatCurrency(totalNetAmount)}</span>` },
-        { label: 'إجمالي المحصل', value: `<span class="currency">${formatCurrency(totalReceived)}</span>` },
-        { label: 'إجمالي المتبقي', value: `<span class="currency">${formatCurrency(totalNetAmount - totalReceived)}</span>` },
-        { label: 'معدل التحصيل', value: `${totalNetAmount > 0 ? ((totalReceived / totalNetAmount) * 100).toFixed(1) : 0}%` }
-      ]
-    }
-  ];
-
-  // ورقة إحصائيات العملاء
-  const clientStats = clients.map(client => {
-    const clientOperations = operations.filter(op => op.clientId === client.id);
-    const clientTotal = clientOperations.reduce((sum, op) => sum + op.totalAmount, 0);
-    const clientDeductions = clientOperations.reduce((sum, op) => sum + calculateTotalDeductions(op), 0);
-    const clientNetAmount = clientOperations.reduce((sum, op) => sum + calculateNetAmount(op), 0);
-    const clientReceived = clientOperations.reduce((sum, op) => sum + op.totalReceived, 0);
-    
-    return [
-      client.name,
-      client.type === 'owner' ? 'مالك' : client.type === 'main_contractor' ? 'مقاول رئيسي' : 'استشاري',
-      clientOperations.length.toString(),
-      `<span class="currency">${formatCurrency(clientTotal)}</span>`,
-      `<span class="currency">${formatCurrency(clientDeductions)}</span>`,
-      `<span class="currency">${formatCurrency(clientNetAmount)}</span>`,
-      `<span class="currency">${formatCurrency(clientReceived)}</span>`,
-      `<span class="currency">${formatCurrency(clientNetAmount - clientReceived)}</span>`,
-      clientNetAmount > 0 ? `${((clientReceived / clientNetAmount) * 100).toFixed(1)}%` : '0%'
-    ];
-  }).filter(stat => parseInt(stat[2]) > 0);
-
-  if (clientStats.length > 0) {
-    content.push({
-      type: 'table',
-      title: 'إحصائيات العملاء',
-      headers: ['العميل', 'نوع العميل', 'عدد العمليات', 'إجمالي القيمة', 'إجمالي الخصومات', 'الصافي المستحق', 'المبلغ المحصل', 'المبلغ المتبقي', 'معدل التحصيل'],
-      rows: clientStats
-    });
-  }
-
-  const blob = createWordDocument('التقرير المالي الشامل', content);
-  const fileName = `التقرير-المالي-${new Date().toISOString().split('T')[0]}.doc`;
-  saveWordDocument(blob, fileName);
-};
-
-// تصدير تقرير مالي إلى Excel
 export const exportFinancialReportToExcel = (operations: Operation[], clients: Client[]) => {
-  // ورقة الإحصائيات العامة
-  const totalAmount = operations.reduce((sum, op) => sum + op.totalAmount, 0);
-  const totalDeductions = operations.reduce((sum, op) => sum + calculateTotalDeductions(op), 0);
-  const totalNetAmount = operations.reduce((sum, op) => sum + calculateNetAmount(op), 0);
-  const totalReceived = operations.reduce((sum, op) => sum + op.totalReceived, 0);
+  const getClientName = (clientId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    return client ? client.name : 'عميل غير معروف';
+  };
 
-  const generalStats = [
-    { 'البند': 'إجمالي العمليات', 'القيمة': operations.length },
-    { 'البند': 'العمليات المكتملة', 'القيمة': operations.filter(op => op.status === 'completed').length },
-    { 'البند': 'العمليات قيد التنفيذ', 'القيمة': operations.filter(op => op.status === 'in_progress').length },
-    { 'البند': 'إجمالي القيمة', 'القيمة': totalAmount },
-    { 'البند': 'إجمالي الخصومات', 'القيمة': totalDeductions },
-    { 'البند': 'الصافي المستحق', 'القيمة': totalNetAmount },
-    { 'البند': 'إجمالي المحصل', 'القيمة': totalReceived },
-    { 'البند': 'إجمالي المتبقي', 'القيمة': totalNetAmount - totalReceived }
-  ];
-
-  // ورقة إحصائيات العملاء
   const clientStats = clients.map(client => {
     const clientOperations = operations.filter(op => op.clientId === client.id);
     const clientTotal = clientOperations.reduce((sum, op) => sum + op.totalAmount, 0);
-    const clientDeductions = clientOperations.reduce((sum, op) => sum + calculateTotalDeductions(op), 0);
-    const clientNetAmount = clientOperations.reduce((sum, op) => sum + calculateNetAmount(op), 0);
     const clientReceived = clientOperations.reduce((sum, op) => sum + op.totalReceived, 0);
     
     return {
       'العميل': client.name,
-      'نوع العميل': client.type === 'owner' ? 'مالك' : client.type === 'main_contractor' ? 'مقاول رئيسي' : 'استشاري',
       'عدد العمليات': clientOperations.length,
       'إجمالي القيمة': clientTotal,
-      'إجمالي الخصومات': clientDeductions,
-      'الصافي المستحق': clientNetAmount,
       'المبلغ المحصل': clientReceived,
-      'المبلغ المتبقي': clientNetAmount - clientReceived,
-      'معدل التحصيل': clientNetAmount > 0 ? `${((clientReceived / clientNetAmount) * 100).toFixed(1)}%` : '0%'
+      'المبلغ المتبقي': clientTotal - clientReceived,
+      'معدل التحصيل (%)': clientTotal > 0 ? ((clientReceived / clientTotal) * 100).toFixed(1) : 0
     };
   }).filter(stat => stat['عدد العمليات'] > 0);
 
-  // إنشاء المصنف
-  const workbook = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(clientStats);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'التقرير المالي');
+  XLSX.writeFile(wb, `التقرير_المالي_${new Date().toISOString().split('T')[0]}.xlsx`);
+};
 
-  // إضافة ورقة الإحصائيات العامة
-  const statsWorksheet = XLSX.utils.json_to_sheet(generalStats);
-  statsWorksheet['!cols'] = [{ wch: 25 }, { wch: 20 }];
-  XLSX.utils.book_append_sheet(workbook, statsWorksheet, 'الإحصائيات العامة');
+export const exportFinancialReportToWord = (operations: Operation[], clients: Client[]) => {
+  const totalAmount = operations.reduce((sum, op) => sum + op.totalAmount, 0);
+  const totalReceived = operations.reduce((sum, op) => sum + op.totalReceived, 0);
+  const totalDeductions = operations.reduce((sum, op) => sum + calculateTotalDeductions(op), 0);
+  const totalNet = operations.reduce((sum, op) => sum + calculateNetAmount(op), 0);
 
-  // إضافة ورقة إحصائيات العملاء
-  if (clientStats.length > 0) {
-    const clientWorksheet = XLSX.utils.json_to_sheet(clientStats);
-    clientWorksheet['!cols'] = [
-      { wch: 25 }, // العميل
-      { wch: 15 }, // نوع العميل
-      { wch: 12 }, // عدد العمليات
-      { wch: 15 }, // إجمالي القيمة
-      { wch: 15 }, // إجمالي الخصومات
-      { wch: 15 }, // الصافي المستحق
-      { wch: 15 }, // المبلغ المحصل
-      { wch: 15 }, // المبلغ المتبقي
-      { wch: 15 }  // معدل التحصيل
-    ];
-    XLSX.utils.book_append_sheet(workbook, clientWorksheet, 'إحصائيات العملاء');
-  }
+  const clientStats = clients.map(client => {
+    const clientOperations = operations.filter(op => op.clientId === client.id);
+    const clientTotal = clientOperations.reduce((sum, op) => sum + op.totalAmount, 0);
+    const clientReceived = clientOperations.reduce((sum, op) => sum + op.totalReceived, 0);
+    
+    return {
+      client,
+      operationsCount: clientOperations.length,
+      totalAmount: clientTotal,
+      totalReceived: clientReceived,
+      outstanding: clientTotal - clientReceived
+    };
+  }).filter(stat => stat.operationsCount > 0);
 
-  const fileName = `التقرير-المالي-${new Date().toISOString().split('T')[0]}.xlsx`;
-  XLSX.writeFile(workbook, fileName);
+  const content = `
+    <div class="summary">
+      <h3>الملخص المالي العام</h3>
+      <p><strong>إجمالي القيمة:</strong> <span class="highlight">${formatCurrency(totalAmount)}</span></p>
+      <p><strong>إجمالي الخصومات:</strong> <span class="highlight">${formatCurrency(totalDeductions)}</span></p>
+      <p><strong>الصافي المستحق:</strong> <span class="highlight">${formatCurrency(totalNet)}</span></p>
+      <p><strong>إجمالي المحصل:</strong> <span class="highlight">${formatCurrency(totalReceived)}</span></p>
+      <p><strong>إجمالي المتبقي:</strong> <span class="highlight">${formatCurrency(totalNet - totalReceived)}</span></p>
+      <p><strong>معدل التحصيل:</strong> <span class="highlight">${totalNet > 0 ? ((totalReceived / totalNet) * 100).toFixed(1) : 0}%</span></p>
+    </div>
+
+    <h2 class="section-title">التفاصيل المالية حسب العميل</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>العميل</th>
+          <th>عدد العمليات</th>
+          <th>إجمالي القيمة</th>
+          <th>المبلغ المحصل</th>
+          <th>المبلغ المتبقي</th>
+          <th>معدل التحصيل</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${clientStats.map(stat => `
+          <tr>
+            <td>${stat.client.name}</td>
+            <td>${stat.operationsCount}</td>
+            <td>${formatCurrency(stat.totalAmount)}</td>
+            <td>${formatCurrency(stat.totalReceived)}</td>
+            <td>${formatCurrency(stat.outstanding)}</td>
+            <td>${stat.totalAmount > 0 ? ((stat.totalReceived / stat.totalAmount) * 100).toFixed(1) : 0}%</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+
+  createWordDocument('التقرير المالي', content);
 };

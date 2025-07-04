@@ -112,7 +112,7 @@ export interface Operation {
   totalAmount: number;
   totalReceived: number;
   overallExecutionPercentage: number;
-  status: 'in_progress' | 'completed' | 'completed_partial_payment';
+  status: 'in_progress' | 'completed' | 'completed_partial_payment' | 'completed_full_payment';
   createdAt: Date;
   updatedAt: Date;
 }

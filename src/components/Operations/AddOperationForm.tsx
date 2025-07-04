@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Save, X, Calendar, CreditCard, FileText, Award } from 'lucide-react';
-import { Client, Operation, OperationItem, Deduction, GuaranteeCheck, GuaranteeLetter, ReceivedPayment, WarrantyCertificate } from '../../types';
-import { generateOperationCode, generateItemCode, calculateOperationTotal, calculateOverallExecutionPercentage, formatCurrency } from '../../utils/calculations';
+import React, { useState } from 'react';
+import { Plus, Trash2, Save, X, Calendar, CreditCard, FileText } from 'lucide-react';
+import { Client, Operation, OperationItem, Deduction, GuaranteeCheck, GuaranteeLetter, ReceivedPayment } from '../../types';
+import { generateOperationCode, generateItemCode, calculateOperationTotal, calculateOverallExecutionPercentage, calculateOperationStatus, formatCurrency } from '../../utils/calculations';
 
 interface AddOperationFormProps {
   clients: Client[];
@@ -13,7 +13,6 @@ const AddOperationForm: React.FC<AddOperationFormProps> = ({ clients, onSave, on
   const [formData, setFormData] = useState({
     clientId: '',
     name: '',
-    code: '',
   });
 
   const [items, setItems] = useState<OperationItem[]>([
@@ -27,40 +26,23 @@ const AddOperationForm: React.FC<AddOperationFormProps> = ({ clients, onSave, on
     }
   ]);
 
-  const [deductions, setDeductions] = useState<Deduction[]>([
-    { id: crypto.randomUUID(), name: 'ضريبة تحت الحساب', type: 'percentage', value: 1, isActive: true },
-    { id: crypto.randomUUID(), name: 'تأمينات المقاولات', type: 'percentage', value: 2.5, isActive: true },
-    { id: crypto.randomUUID(), name: 'العمالة غير المنتظمة', type: 'percentage', value: 1, isActive: true },
-    { id: crypto.randomUUID(), name: 'الدمغة الهندسية', type: 'fixed', value: 500, isActive: true },
-  ]);
-
+  const [deductions, setDeductions] = useState<Deduction[]>([]);
   const [guaranteeChecks, setGuaranteeChecks] = useState<GuaranteeCheck[]>([]);
   const [guaranteeLetters, setGuaranteeLetters] = useState<GuaranteeLetter[]>([]);
-  const [warrantyCertificates, setWarrantyCertificates] = useState<WarrantyCertificate[]>([]);
   const [receivedPayments, setReceivedPayments] = useState<ReceivedPayment[]>([]);
-
   const [activeSection, setActiveSection] = useState<string>('basic');
 
-  useEffect(() => {
-    if (formData.clientId && formData.name) {
-      const client = clients.find(c => c.id === formData.clientId);
-      if (client) {
-        const code = generateOperationCode(client.name, formData.name);
-        setFormData(prev => ({ ...prev, code }));
-        
-        // Update item codes
-        setItems(prev => prev.map((item, index) => ({
-          ...item,
-          code: generateItemCode(code, index)
-        })));
-      }
-    }
-  }, [formData.clientId, formData.name, clients]);
-
   const addItem = () => {
+    const operationCode = formData.clientId && formData.name 
+      ? generateOperationCode(
+          clients.find(c => c.id === formData.clientId)?.name || '',
+          formData.name
+        )
+      : 'TEMP';
+
     const newItem: OperationItem = {
       id: crypto.randomUUID(),
-      code: generateItemCode(formData.code, items.length),
+      code: generateItemCode(operationCode, items.length),
       description: '',
       amount: 0,
       executionPercentage: 0,
@@ -78,10 +60,16 @@ const AddOperationForm: React.FC<AddOperationFormProps> = ({ clients, onSave, on
   const removeItem = (index: number) => {
     if (items.length > 1) {
       const newItems = items.filter((_, i) => i !== index);
-      // Update codes for remaining items
+      const operationCode = formData.clientId && formData.name 
+        ? generateOperationCode(
+            clients.find(c => c.id === formData.clientId)?.name || '',
+            formData.name
+          )
+        : 'TEMP';
+      
       const updatedItems = newItems.map((item, i) => ({
         ...item,
-        code: generateItemCode(formData.code, i)
+        code: generateItemCode(operationCode, i)
       }));
       setItems(updatedItems);
     }
@@ -166,35 +154,6 @@ const AddOperationForm: React.FC<AddOperationFormProps> = ({ clients, onSave, on
     setGuaranteeLetters(guaranteeLetters.filter((_, i) => i !== index));
   };
 
-  const addWarrantyCertificate = () => {
-    const today = new Date();
-    const endDate = new Date(today);
-    endDate.setFullYear(endDate.getFullYear() + 1);
-
-    const newWarranty: WarrantyCertificate = {
-      id: crypto.randomUUID(),
-      certificateNumber: '',
-      issueDate: today,
-      startDate: today,
-      endDate: endDate,
-      warrantyPeriodMonths: 12,
-      description: '',
-      relatedTo: 'operation',
-      isActive: true
-    };
-    setWarrantyCertificates([...warrantyCertificates, newWarranty]);
-  };
-
-  const updateWarrantyCertificate = (index: number, field: keyof WarrantyCertificate, value: any) => {
-    const updatedWarranties = [...warrantyCertificates];
-    updatedWarranties[index] = { ...updatedWarranties[index], [field]: value };
-    setWarrantyCertificates(updatedWarranties);
-  };
-
-  const removeWarrantyCertificate = (index: number) => {
-    setWarrantyCertificates(warrantyCertificates.filter((_, i) => i !== index));
-  };
-
   const addReceivedPayment = () => {
     const newPayment: ReceivedPayment = {
       id: crypto.randomUUID(),
@@ -228,35 +187,45 @@ const AddOperationForm: React.FC<AddOperationFormProps> = ({ clients, onSave, on
       return;
     }
 
+    const client = clients.find(c => c.id === formData.clientId);
+    if (!client) return;
+
+    const operationCode = generateOperationCode(client.name, formData.name);
     const totalAmount = calculateOperationTotal(items);
     const overallExecutionPercentage = calculateOverallExecutionPercentage(items);
     const totalReceived = receivedPayments.reduce((sum, payment) => sum + payment.amount, 0);
-    
-    let status: Operation['status'] = 'in_progress';
-    if (overallExecutionPercentage >= 100) {
-      status = totalReceived >= totalAmount ? 'completed' : 'completed_partial_payment';
-    }
 
-    const operation: Operation = {
+    // تحديث أكواد البنود
+    const updatedItems = items.map((item, index) => ({
+      ...item,
+      code: generateItemCode(operationCode, index)
+    }));
+
+    const newOperation: Operation = {
       id: crypto.randomUUID(),
-      code: formData.code,
+      code: operationCode,
       name: formData.name,
       clientId: formData.clientId,
-      items,
+      items: updatedItems,
       deductions,
       guaranteeChecks,
       guaranteeLetters,
-      warrantyCertificates,
+      warrantyCertificates: [],
       receivedPayments,
       totalAmount,
       totalReceived,
       overallExecutionPercentage,
-      status,
+      status: calculateOperationStatus({
+        overallExecutionPercentage,
+        totalReceived,
+        items: updatedItems,
+        deductions
+      } as Operation),
       createdAt: new Date(),
       updatedAt: new Date(),
     };
 
-    onSave(operation);
+    onSave(newOperation);
   };
 
   const sections = [
@@ -264,7 +233,6 @@ const AddOperationForm: React.FC<AddOperationFormProps> = ({ clients, onSave, on
     { id: 'items', label: 'بنود العملية', icon: Plus },
     { id: 'deductions', label: 'الخصومات', icon: Trash2 },
     { id: 'guarantees', label: 'الضمانات', icon: CreditCard },
-    { id: 'warranties', label: 'شهادات الضمان', icon: Award },
     { id: 'payments', label: 'المدفوعات', icon: Calendar },
   ];
 
@@ -272,7 +240,7 @@ const AddOperationForm: React.FC<AddOperationFormProps> = ({ clients, onSave, on
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-6">
         <h2 className="text-3xl font-bold text-gray-900 mb-2">إضافة عملية جديدة</h2>
-        <p className="text-gray-600">إدخال بيانات العملية الجديدة والتفاصيل المرتبطة بها</p>
+        <p className="text-gray-600">إنشاء عملية إنشائية جديدة مع جميع التفاصيل والبيانات المطلوبة</p>
       </div>
 
       {/* Section Navigation */}
@@ -337,18 +305,22 @@ const AddOperationForm: React.FC<AddOperationFormProps> = ({ clients, onSave, on
                 />
               </div>
 
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  كود العملية
-                </label>
-                <input
-                  type="text"
-                  value={formData.code}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
-                  placeholder="سيتم إنشاء الكود تلقائياً"
-                  readOnly
-                />
-              </div>
+              {formData.clientId && formData.name && (
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    كود العملية (سيتم إنشاؤه تلقائياً)
+                  </label>
+                  <input
+                    type="text"
+                    value={generateOperationCode(
+                      clients.find(c => c.id === formData.clientId)?.name || '',
+                      formData.name
+                    )}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
+                    readOnly
+                  />
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -391,7 +363,16 @@ const AddOperationForm: React.FC<AddOperationFormProps> = ({ clients, onSave, on
                       </label>
                       <input
                         type="text"
-                        value={item.code}
+                        value={formData.clientId && formData.name 
+                          ? generateItemCode(
+                              generateOperationCode(
+                                clients.find(c => c.id === formData.clientId)?.name || '',
+                                formData.name
+                              ),
+                              index
+                            )
+                          : 'TEMP-001'
+                        }
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-600"
                         readOnly
                       />
@@ -483,7 +464,7 @@ const AddOperationForm: React.FC<AddOperationFormProps> = ({ clients, onSave, on
           </div>
         )}
 
-        {/* Deductions */}
+        {/* Deductions Section */}
         {activeSection === 'deductions' && (
           <div className="bg-white p-8 rounded-lg border border-gray-200 shadow-sm">
             <div className="flex justify-between items-center mb-6">
@@ -567,10 +548,16 @@ const AddOperationForm: React.FC<AddOperationFormProps> = ({ clients, onSave, on
                 </div>
               ))}
             </div>
+
+            {deductions.length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                لا توجد خصومات مضافة. يمكنك إضافة خصومات حسب الحاجة.
+              </div>
+            )}
           </div>
         )}
 
-        {/* Guarantees */}
+        {/* Guarantees Section */}
         {activeSection === 'guarantees' && (
           <div className="space-y-8">
             {/* Guarantee Checks */}
@@ -678,56 +665,16 @@ const AddOperationForm: React.FC<AddOperationFormProps> = ({ clients, onSave, on
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                         />
                       </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          مرتبط بـ
-                        </label>
-                        <select
-                          value={check.relatedTo}
-                          onChange={(e) => updateGuaranteeCheck(index, 'relatedTo', e.target.value as 'operation' | 'item')}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        >
-                          <option value="operation">العملية كاملة</option>
-                          <option value="item">بند محدد</option>
-                        </select>
-                      </div>
-
-                      {check.relatedTo === 'item' && (
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            البند
-                          </label>
-                          <select
-                            value={check.relatedItemId || ''}
-                            onChange={(e) => updateGuaranteeCheck(index, 'relatedItemId', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                          >
-                            <option value="">اختر البند</option>
-                            {items.map((item) => (
-                              <option key={item.id} value={item.id}>
-                                {item.description}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-
-                      <div className="flex items-center">
-                        <label className="flex items-center">
-                          <input
-                            type="checkbox"
-                            checked={check.isReturned}
-                            onChange={(e) => updateGuaranteeCheck(index, 'isReturned', e.target.checked)}
-                            className="mr-2 h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
-                          />
-                          <span className="text-sm text-gray-700">تم الاسترداد</span>
-                        </label>
-                      </div>
                     </div>
                   </div>
                 ))}
               </div>
+
+              {guaranteeChecks.length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  لا توجد شيكات ضمان مضافة. يمكنك إضافة شيكات ضمان حسب الحاجة.
+                </div>
+              )}
             </div>
 
             {/* Guarantee Letters */}
@@ -838,224 +785,33 @@ const AddOperationForm: React.FC<AddOperationFormProps> = ({ clients, onSave, on
                         </select>
                       </div>
 
-                      {letter.relatedTo === 'item' && (
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            البند
-                          </label>
-                          <select
-                            value={letter.relatedItemId || ''}
-                            onChange={(e) => updateGuaranteeLetter(index, 'relatedItemId', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                          >
-                            <option value="">اختر البند</option>
-                            {items.map((item) => (
-                              <option key={item.id} value={item.id}>
-                                {item.description}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-
-                      <div className="flex items-center">
-                        <label className="flex items-center">
-                          <input
-                            type="checkbox"
-                            checked={letter.isReturned}
-                            onChange={(e) => updateGuaranteeLetter(index, 'isReturned', e.target.checked)}
-                            className="mr-2 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-                          />
-                          <span className="text-sm text-gray-700">تم الاسترداد</span>
+                      <div className="md:col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          ملاحظات
                         </label>
+                        <input
+                          type="text"
+                          value={letter.notes || ''}
+                          onChange={(e) => updateGuaranteeLetter(index, 'notes', e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          placeholder="ملاحظات إضافية"
+                        />
                       </div>
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* Warranty Certificates */}
-        {activeSection === 'warranties' && (
-          <div className="bg-white p-8 rounded-lg border border-gray-200 shadow-sm">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-semibold text-gray-900">شهادات الضمان</h3>
-              <button
-                type="button"
-                onClick={addWarrantyCertificate}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                إضافة شهادة ضمان
-              </button>
-            </div>
-
-            <div className="space-y-6">
-              {warrantyCertificates.map((warranty, index) => (
-                <div key={warranty.id} className="p-6 border border-gray-200 rounded-lg bg-green-50">
-                  <div className="flex justify-between items-center mb-4">
-                    <span className="text-lg font-medium text-green-900">شهادة الضمان {index + 1}</span>
-                    <button
-                      type="button"
-                      onClick={() => removeWarrantyCertificate(index)}
-                      className="text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-50"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        رقم الشهادة
-                      </label>
-                      <input
-                        type="text"
-                        value={warranty.certificateNumber}
-                        onChange={(e) => updateWarrantyCertificate(index, 'certificateNumber', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                        placeholder="رقم الشهادة"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        تاريخ الإصدار
-                      </label>
-                      <input
-                        type="date"
-                        value={warranty.issueDate.toISOString().split('T')[0]}
-                        onChange={(e) => updateWarrantyCertificate(index, 'issueDate', new Date(e.target.value))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        تاريخ بداية الضمان
-                      </label>
-                      <input
-                        type="date"
-                        value={warranty.startDate.toISOString().split('T')[0]}
-                        onChange={(e) => updateWarrantyCertificate(index, 'startDate', new Date(e.target.value))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        مدة الضمان (بالأشهر)
-                      </label>
-                      <input
-                        type="number"
-                        value={warranty.warrantyPeriodMonths}
-                        onChange={(e) => {
-                          const months = parseInt(e.target.value) || 0;
-                          updateWarrantyCertificate(index, 'warrantyPeriodMonths', months);
-                          // Update end date automatically
-                          const endDate = new Date(warranty.startDate);
-                          endDate.setMonth(endDate.getMonth() + months);
-                          updateWarrantyCertificate(index, 'endDate', endDate);
-                        }}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                        min="1"
-                        placeholder="12"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        تاريخ انتهاء الضمان
-                      </label>
-                      <input
-                        type="date"
-                        value={warranty.endDate.toISOString().split('T')[0]}
-                        onChange={(e) => updateWarrantyCertificate(index, 'endDate', new Date(e.target.value))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        مرتبط بـ
-                      </label>
-                      <select
-                        value={warranty.relatedTo}
-                        onChange={(e) => updateWarrantyCertificate(index, 'relatedTo', e.target.value as 'operation' | 'item')}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                      >
-                        <option value="operation">العملية كاملة</option>
-                        <option value="item">بند محدد</option>
-                      </select>
-                    </div>
-
-                    {warranty.relatedTo === 'item' && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          البند
-                        </label>
-                        <select
-                          value={warranty.relatedItemId || ''}
-                          onChange={(e) => updateWarrantyCertificate(index, 'relatedItemId', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                        >
-                          <option value="">اختر البند</option>
-                          {items.map((item) => (
-                            <option key={item.id} value={item.id}>
-                              {item.description}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        وصف الضمان
-                      </label>
-                      <textarea
-                        value={warranty.description}
-                        onChange={(e) => updateWarrantyCertificate(index, 'description', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                        rows={3}
-                        placeholder="وصف شهادة الضمان"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        ملاحظات
-                      </label>
-                      <textarea
-                        value={warranty.notes || ''}
-                        onChange={(e) => updateWarrantyCertificate(index, 'notes', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                        rows={2}
-                        placeholder="ملاحظات إضافية"
-                      />
-                    </div>
-
-                    <div className="flex items-center">
-                      <label className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={warranty.isActive}
-                          onChange={(e) => updateWarrantyCertificate(index, 'isActive', e.target.checked)}
-                          className="mr-2 h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
-                        />
-                        <span className="text-sm text-gray-700">شهادة نشطة</span>
-                      </label>
-                    </div>
-                  </div>
+              {guaranteeLetters.length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  لا توجد خطابات ضمان مضافة. يمكنك إضافة خطابات ضمان حسب الحاجة.
                 </div>
-              ))}
+              )}
             </div>
           </div>
         )}
 
-        {/* Received Payments */}
+        {/* Received Payments Section */}
         {activeSection === 'payments' && (
           <div className="bg-white p-8 rounded-lg border border-gray-200 shadow-sm">
             <div className="flex justify-between items-center mb-6">
@@ -1185,14 +941,22 @@ const AddOperationForm: React.FC<AddOperationFormProps> = ({ clients, onSave, on
               ))}
             </div>
 
-            <div className="mt-6 p-6 bg-green-100 rounded-lg border border-green-200">
-              <div className="flex justify-between items-center text-lg">
-                <span className="font-medium text-green-900">إجمالي المدفوعات المستلمة:</span>
-                <span className="font-bold text-green-900">
-                  {formatCurrency(receivedPayments.reduce((sum, payment) => sum + payment.amount, 0))}
-                </span>
+            {receivedPayments.length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                لا توجد مدفوعات مضافة. يمكنك إضافة المدفوعات المستلمة حسب الحاجة.
               </div>
-            </div>
+            )}
+
+            {receivedPayments.length > 0 && (
+              <div className="mt-6 p-6 bg-green-100 rounded-lg border border-green-200">
+                <div className="flex justify-between items-center text-lg">
+                  <span className="font-medium text-green-900">إجمالي المدفوعات المستلمة:</span>
+                  <span className="font-bold text-green-900">
+                    {formatCurrency(receivedPayments.reduce((sum, payment) => sum + payment.amount, 0))}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
