@@ -14,7 +14,7 @@ import ReportsManager from './components/Reports/ReportsManager';
 import { Operation, Client, DashboardStats } from './types';
 import { storage } from './utils/storage';
 import { initializeDatabase, dbOperations } from './utils/database';
-import { calculateNetAmount, calculateTotalDeductions } from './utils/calculations';
+import { calculateNetAmount, calculateTotalDeductions, calculateOperationStatus } from './utils/calculations';
 
 function App() {
   const [activeView, setActiveView] = useState('dashboard');
@@ -64,7 +64,11 @@ function App() {
   // Calculate dashboard statistics with deductions
   const getDashboardStats = (): DashboardStats => {
     const totalOperations = operations.length;
-    const completedOperations = operations.filter(op => op.status === 'completed').length;
+    const completedOperations = operations.filter(op => 
+      op.status === 'completed' || 
+      op.status === 'completed_partial_payment' || 
+      op.status === 'completed_full_payment'
+    ).length;
     const inProgressOperations = operations.filter(op => op.status === 'in_progress').length;
     const totalAmount = operations.reduce((sum, op) => sum + op.totalAmount, 0);
     const totalDeductions = operations.reduce((sum, op) => sum + calculateTotalDeductions(op), 0);
@@ -106,7 +110,15 @@ function App() {
 
   const handleUpdateOperation = async (operation: Operation) => {
     try {
-      await storage.updateOperation(operation.id, operation);
+      // إعادة حساب الحالة بناءً على البيانات الجديدة
+      const updatedStatus = calculateOperationStatus(operation);
+      const operationWithUpdatedStatus = {
+        ...operation,
+        status: updatedStatus,
+        updatedAt: new Date()
+      };
+
+      await storage.updateOperation(operation.id, operationWithUpdatedStatus);
       const updatedOperations = await storage.getOperations();
       setOperations(updatedOperations);
       setActiveView('view-operations');

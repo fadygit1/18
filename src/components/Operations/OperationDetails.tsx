@@ -16,6 +16,26 @@ const OperationDetails: React.FC<OperationDetailsProps> = ({ operation, client, 
   const netAmount = calculateNetAmount(operation);
   const remainingAmount = netAmount - operation.totalReceived;
 
+  const getStatusLabel = (status: Operation['status']) => {
+    const statusLabels = {
+      'in_progress': 'قيد التنفيذ',
+      'completed': 'مكتملة',
+      'completed_partial_payment': 'مكتملة - دفع جزئي',
+      'completed_full_payment': 'مكتملة ومدفوعة بالكامل'
+    };
+    return statusLabels[status];
+  };
+
+  const getStatusColor = (status: Operation['status']) => {
+    const statusColors = {
+      'in_progress': 'bg-yellow-100 text-yellow-800',
+      'completed': 'bg-gray-100 text-gray-800',
+      'completed_partial_payment': 'bg-orange-100 text-orange-800',
+      'completed_full_payment': 'bg-green-100 text-green-800'
+    };
+    return statusColors[status];
+  };
+
   const handleExportPDF = () => {
     try {
       exportOperationDetailsToPDF(operation, client);
@@ -40,7 +60,12 @@ const OperationDetails: React.FC<OperationDetailsProps> = ({ operation, client, 
         <div className="sticky top-0 bg-white border-b border-gray-200 p-6 flex justify-between items-center">
           <div>
             <h2 className="text-2xl font-bold text-gray-900">{operation.name}</h2>
-            <p className="text-gray-600">كود العملية: {operation.code}</p>
+            <div className="flex items-center gap-4 mt-2">
+              <p className="text-gray-600">كود العملية: {operation.code}</p>
+              <span className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${getStatusColor(operation.status)}`}>
+                {getStatusLabel(operation.status)}
+              </span>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -48,7 +73,7 @@ const OperationDetails: React.FC<OperationDetailsProps> = ({ operation, client, 
               className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
             >
               <Download className="w-4 h-4" />
-              تصدير PDF
+              تصدير HTML
             </button>
             <button
               onClick={handleExportWord}

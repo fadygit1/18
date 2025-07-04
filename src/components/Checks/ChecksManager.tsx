@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CheckSquare, Search, Filter, Calendar, DollarSign, AlertTriangle, CheckCircle, Download, FileSpreadsheet, FileEdit } from 'lucide-react';
+import { CheckSquare, Search, Filter, Calendar, DollarSign, AlertTriangle, CheckCircle, X, Download, FileSpreadsheet, FileEdit } from 'lucide-react';
 import { Operation, Client, ReceivedPayment } from '../../types';
 import { formatCurrency, formatDate } from '../../utils/calculations';
 import { exportChecksAndPaymentsToPDF, exportChecksAndPaymentsToExcel, exportChecksAndPaymentsToWord } from '../../utils/exportUtils';
@@ -9,10 +9,35 @@ interface ChecksManagerProps {
   clients: Client[];
 }
 
+interface AdvancedFilters {
+  clientId: string;
+  operationId: string;
+  status: string;
+  type: string;
+  startDate: string;
+  endDate: string;
+  minAmount: string;
+  maxAmount: string;
+  searchTerm: string;
+}
+
 const ChecksManager: React.FC<ChecksManagerProps> = ({ operations, clients }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'received' | 'pending'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'check' | 'cash'>('all');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  
+  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>({
+    clientId: 'all',
+    operationId: 'all',
+    status: 'all',
+    type: 'all',
+    startDate: '',
+    endDate: '',
+    minAmount: '',
+    maxAmount: '',
+    searchTerm: ''
+  });
 
   const getClientName = (clientId: string) => {
     const client = clients.find(c => c.id === clientId);
@@ -31,21 +56,95 @@ const ChecksManager: React.FC<ChecksManagerProps> = ({ operations, clients }) =>
     }))
   );
 
-  const filteredPayments = allReceivedPayments.filter(payment => {
-    const matchesSearch = (payment.checkNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         (payment.bank || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         payment.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         payment.operationName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         payment.operationCode.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesType = typeFilter === 'all' || payment.type === typeFilter;
-    
-    const matchesStatus = statusFilter === 'all' || 
-                         (statusFilter === 'received' && payment.receiptDate) ||
-                         (statusFilter === 'pending' && !payment.receiptDate && payment.type === 'check');
-    
-    return matchesSearch && matchesType && matchesStatus;
-  });
+  const applyAdvancedFilters = (payments: any[]): any[] => {
+    return payments.filter(payment => {
+      // البحث النصي
+      const searchMatch = !advancedFilters.searchTerm || 
+        (payment.checkNumber || '').toLowerCase().includes(advancedFilters.searchTerm.toLowerCase()) ||
+        (payment.bank || '').toLowerCase().includes(advancedFilters.searchTerm.toLowerCase()) ||
+        payment.clientName.toLowerCase().includes(advancedFilters.searchTerm.toLowerCase()) ||
+        payment.operationName.toLowerCase().includes(advancedFilters.searchTerm.toLowerCase()) ||
+        payment.operationCode.toLowerCase().includes(advancedFilters.searchTerm.toLowerCase());
+
+      // فلتر العميل
+      const clientMatch = advancedFilters.clientId === 'all' || payment.clientId === advancedFilters.clientId;
+
+      // فلتر العملية
+      const operationMatch = advancedFilters.operationId === 'all' || payment.operationId === advancedFilters.operationId;
+
+      // فلتر النوع
+      const typeMatch = advancedFilters.type === 'all' || payment.type === advancedFilters.type;
+
+      // فلتر الحالة
+      const statusMatch = advancedFilters.status === 'all' || 
+                         (advancedFilters.status === 'received' && payment.receiptDate) ||
+                         (advancedFilters.status === 'pending' && !payment.receiptDate && payment.type === 'check');
+
+      // فلتر التاريخ
+      let dateMatch = true;
+      if (advancedFilters.startDate) {
+        const startDate = new Date(advancedFilters.startDate);
+        dateMatch = dateMatch && new Date(payment.date) >= startDate;
+      }
+      if (advancedFilters.endDate) {
+        const endDate = new Date(advancedFilters.endDate);
+        endDate.setHours(23, 59, 59, 999);
+        dateMatch = dateMatch && new Date(payment.date) <= endDate;
+      }
+
+      // فلتر المبلغ
+      let amountMatch = true;
+      if (advancedFilters.minAmount) {
+        const minAmount = parseFloat(advancedFilters.minAmount);
+        amountMatch = amountMatch && payment.amount >= minAmount;
+      }
+      if (advancedFilters.maxAmount) {
+        const maxAmount = parseFloat(advancedFilters.maxAmount);
+        amountMatch = amountMatch && payment.amount <= maxAmount;
+      }
+
+      return searchMatch && clientMatch && operationMatch && typeMatch && statusMatch && dateMatch && amountMatch;
+    });
+  };
+
+  const filteredPayments = showAdvancedFilters 
+    ? applyAdvancedFilters(allReceivedPayments)
+    : allReceivedPayments.filter(payment => {
+        const matchesSearch = (payment.checkNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                             (payment.bank || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                             payment.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                             payment.operationName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                             payment.operationCode.toLowerCase().includes(searchTerm.toLowerCase());
+        
+        const matchesType = typeFilter === 'all' || payment.type === typeFilter;
+        
+        const matchesStatus = statusFilter === 'all' || 
+                             (statusFilter === 'received' && payment.receiptDate) ||
+                             (statusFilter === 'pending' && !payment.receiptDate && payment.type === 'check');
+        
+        return matchesSearch && matchesType && matchesStatus;
+      });
+
+  const resetAdvancedFilters = () => {
+    setAdvancedFilters({
+      clientId: 'all',
+      operationId: 'all',
+      status: 'all',
+      type: 'all',
+      startDate: '',
+      endDate: '',
+      minAmount: '',
+      maxAmount: '',
+      searchTerm: ''
+    });
+  };
+
+  const handleAdvancedFilterChange = (field: keyof AdvancedFilters, value: string) => {
+    setAdvancedFilters(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
 
   const totalAmount = allReceivedPayments.reduce((sum, payment) => sum + payment.amount, 0);
   const totalChecks = allReceivedPayments.filter(p => p.type === 'check').length;
@@ -154,46 +253,245 @@ const ChecksManager: React.FC<ChecksManagerProps> = ({ operations, clients }) =>
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="mb-6 bg-white p-4 rounded-lg border border-gray-200">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input
-              type="text"
-              placeholder="البحث..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+      {/* Basic Filters */}
+      {!showAdvancedFilters && (
+        <div className="mb-6 bg-white p-4 rounded-lg border border-gray-200">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <input
+                type="text"
+                placeholder="البحث..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as 'all' | 'check' | 'cash')}
+              className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">جميع الأنواع</option>
+              <option value="check">شيكات</option>
+              <option value="cash">نقدي</option>
+            </select>
+
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as 'all' | 'received' | 'pending')}
+              className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">جميع الحالات</option>
+              <option value="received">مستلمة</option>
+              <option value="pending">معلقة</option>
+            </select>
+
+            <button 
+              onClick={() => setShowAdvancedFilters(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+            >
+              <Filter className="w-4 h-4" />
+              فلاتر متقدمة
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Advanced Filters */}
+      {showAdvancedFilters && (
+        <div className="mb-6 bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <Filter className="w-5 h-5" />
+              الفلاتر المتقدمة
+            </h3>
+            <button
+              onClick={() => setShowAdvancedFilters(false)}
+              className="text-gray-400 hover:text-gray-600 p-1 rounded"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
-          <select
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value as 'all' | 'check' | 'cash')}
-            className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="all">جميع الأنواع</option>
-            <option value="check">شيكات</option>
-            <option value="cash">نقدي</option>
-          </select>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+            {/* البحث النصي */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                البحث النصي
+              </label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <input
+                  type="text"
+                  placeholder="رقم الشيك، البنك، العميل..."
+                  value={advancedFilters.searchTerm}
+                  onChange={(e) => handleAdvancedFilterChange('searchTerm', e.target.value)}
+                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
 
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as 'all' | 'received' | 'pending')}
-            className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="all">جميع الحالات</option>
-            <option value="received">مستلمة</option>
-            <option value="pending">معلقة</option>
-          </select>
+            {/* العميل */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                العميل
+              </label>
+              <select
+                value={advancedFilters.clientId}
+                onChange={(e) => handleAdvancedFilterChange('clientId', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">جميع العملاء</option>
+                {clients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {client.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          <button className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors">
-            <Filter className="w-4 h-4" />
-            مرشحات متقدمة
-          </button>
+            {/* العملية */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                العملية
+              </label>
+              <select
+                value={advancedFilters.operationId}
+                onChange={(e) => handleAdvancedFilterChange('operationId', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">جميع العمليات</option>
+                {operations.map((operation) => (
+                  <option key={operation.id} value={operation.id}>
+                    {operation.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* النوع */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                نوع الدفع
+              </label>
+              <select
+                value={advancedFilters.type}
+                onChange={(e) => handleAdvancedFilterChange('type', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">جميع الأنواع</option>
+                <option value="check">شيكات</option>
+                <option value="cash">نقدي</option>
+              </select>
+            </div>
+
+            {/* الحالة */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                حالة الدفع
+              </label>
+              <select
+                value={advancedFilters.status}
+                onChange={(e) => handleAdvancedFilterChange('status', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">جميع الحالات</option>
+                <option value="received">مستلمة</option>
+                <option value="pending">معلقة</option>
+              </select>
+            </div>
+
+            {/* تاريخ البداية */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                من تاريخ
+              </label>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <input
+                  type="date"
+                  value={advancedFilters.startDate}
+                  onChange={(e) => handleAdvancedFilterChange('startDate', e.target.value)}
+                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            {/* تاريخ النهاية */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                إلى تاريخ
+              </label>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <input
+                  type="date"
+                  value={advancedFilters.endDate}
+                  onChange={(e) => handleAdvancedFilterChange('endDate', e.target.value)}
+                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            {/* الحد الأدنى للمبلغ */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                الحد الأدنى للمبلغ (ج.م)
+              </label>
+              <input
+                type="number"
+                placeholder="0"
+                value={advancedFilters.minAmount}
+                onChange={(e) => handleAdvancedFilterChange('minAmount', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                min="0"
+                step="0.01"
+              />
+            </div>
+
+            {/* الحد الأقصى للمبلغ */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                الحد الأقصى للمبلغ (ج.م)
+              </label>
+              <input
+                type="number"
+                placeholder="∞"
+                value={advancedFilters.maxAmount}
+                onChange={(e) => handleAdvancedFilterChange('maxAmount', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                min="0"
+                step="0.01"
+              />
+            </div>
+          </div>
+
+          {/* أزرار التحكم */}
+          <div className="flex gap-3">
+            <button
+              onClick={resetAdvancedFilters}
+              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+            >
+              مسح الفلاتر
+            </button>
+            <button
+              onClick={() => setShowAdvancedFilters(false)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+            >
+              إخفاء الفلاتر المتقدمة
+            </button>
+          </div>
+
+          {/* عرض عدد النتائج */}
+          <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+            <p className="text-sm text-blue-800">
+              <span className="font-semibold">{filteredPayments.length}</span> مدفوعة من أصل {allReceivedPayments.length}
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Payments Table */}
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">

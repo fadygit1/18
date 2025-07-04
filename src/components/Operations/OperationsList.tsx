@@ -52,7 +52,8 @@ const OperationsList: React.FC<OperationsListProps> = ({
     const statusLabels = {
       'in_progress': 'قيد التنفيذ',
       'completed': 'مكتملة',
-      'completed_partial_payment': 'مكتملة - دفع جزئي'
+      'completed_partial_payment': 'مكتملة - دفع جزئي',
+      'completed_full_payment': 'مكتملة ومدفوعة بالكامل'
     };
     return statusLabels[status];
   };
@@ -60,8 +61,9 @@ const OperationsList: React.FC<OperationsListProps> = ({
   const getStatusColor = (status: Operation['status']) => {
     const statusColors = {
       'in_progress': 'bg-yellow-100 text-yellow-800',
-      'completed': 'bg-green-100 text-green-800',
-      'completed_partial_payment': 'bg-orange-100 text-orange-800'
+      'completed': 'bg-gray-100 text-gray-800',
+      'completed_partial_payment': 'bg-orange-100 text-orange-800',
+      'completed_full_payment': 'bg-green-100 text-green-800'
     };
     return statusColors[status];
   };
@@ -168,6 +170,7 @@ const OperationsList: React.FC<OperationsListProps> = ({
               <option value="in_progress">قيد التنفيذ</option>
               <option value="completed">مكتملة</option>
               <option value="completed_partial_payment">مكتملة - دفع جزئي</option>
+              <option value="completed_full_payment">مكتملة ومدفوعة بالكامل</option>
             </select>
 
             <select
@@ -261,6 +264,7 @@ const OperationsList: React.FC<OperationsListProps> = ({
                 <option value="in_progress">قيد التنفيذ</option>
                 <option value="completed">مكتملة</option>
                 <option value="completed_partial_payment">مكتملة - دفع جزئي</option>
+                <option value="completed_full_payment">مكتملة ومدفوعة بالكامل</option>
               </select>
             </div>
 
